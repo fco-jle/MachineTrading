@@ -71,11 +71,15 @@ class FixedRateBond:
         engine = ql.DiscountingBondEngine(term_structure)
         self.bond.setPricingEngine(engine)
 
-    def clean_price(self, bond_yield):
+    def clean_price(self, bond_yield, eval_date=None):
+        if eval_date:
+            self.set_evaluation_date(eval_date)
         self._set_pricing_engine(bond_yield)
         return self.bond.cleanPrice()
 
-    def dirty_price(self, bond_yield):
+    def dirty_price(self, bond_yield, eval_date=None):
+        if eval_date:
+            self.set_evaluation_date(eval_date)
         self._set_pricing_engine(bond_yield)
         return self.bond.dirtyPrice()
 

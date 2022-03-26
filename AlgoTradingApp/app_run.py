@@ -25,8 +25,18 @@ class AppBond:
         issue = dt.datetime.strptime(bond_info["IssueDate"], '%Y-%m-%d')
         coupon = bond_info["CouponInterest"]
         self.bond = FixedRateBond(issue_date=issue, maturity_date=maturity, coupon=coupon, settlement_days=2)
+
         self._yield_data = yield_data.copy()
         self._yield_data_backup = yield_data.copy()
+
+        self._price_data = self.compute_price_data()
+        self._price_data_backup = self._price_data.copy()
+
+    def compute_price_data(self):
+        temp = self._yield_data.copy()
+        for col in ['Close', 'Open', 'High', 'Low']:
+            temp[col] = temp.apply(lambda row: self.bond.clean_price(row[col], row['Date']), axis=1)
+        return temp
 
     def get_original_yield_data(self):
         return self._yield_data_backup
@@ -37,8 +47,20 @@ class AppBond:
     def set_current_yield_data(self, data):
         self._yield_data = data.copy()
 
+    def get_original_price_data(self):
+        return self._price_data_backup
+
+    def get_current_price_data(self):
+        return self._price_data
+
+    def set_current_price_data(self, data):
+        self._price_data = data.copy()
+
     def reset_yield_data(self):
         self._yield_data = self._yield_data_backup.copy()
+
+    def reset_price_data(self):
+        selt._price_data = self._price_data_backup.copy()
 
 
 class InstrumentsGroupParam(ptypes.GroupParameter):
@@ -126,14 +148,18 @@ class Window(QMainWindow):
         self.objectGroup = InstrumentsGroupParam()
 
         # Plot Layout
-        # self.splitter = QtWidgets.QSplitter()
-        # self.splitter.setOrientation(QtCore.Qt.Orientation.Horizontal)
+        self.splitter = QtWidgets.QSplitter()
+        self.splitter.setOrientation(QtCore.Qt.Orientation.Horizontal)
+        self.ui.plotsLayout.addWidget(self.splitter)
 
-        self.graphic_layout_widget = pg.GraphicsLayoutWidget()
-        self.ui.plotsLayout.addWidget(self.graphic_layout_widget)
+        self.time_series_plots = pg.GraphicsLayoutWidget()
+        self.splitter.addWidget(self.time_series_plots)
 
-        self.price_plot = self.graphic_layout_widget.addPlot(axisItems={'bottom': pg.DateAxisItem()})
-        self.price_plot.showGrid(x=True, y=True)
+        self.yield_plot = self.time_series_plots.addPlot(row=0, col=0, axisItems={'bottom': pg.DateAxisItem()})
+        self.price_plot = self.time_series_plots.addPlot(row=1, col=0, axisItems={'bottom': pg.DateAxisItem()})
+        self.price_plot.setXLink(self.yield_plot)
+        self.yield_plot.showGrid(x=False, y=True)
+        self.price_plot.showGrid(x=False, y=True)
 
         # Tree
         self.setup_config()
@@ -145,7 +171,7 @@ class Window(QMainWindow):
             dict(name='Load Preset', type='list', limits=[]),
             dict(name='Candles Window', type='str', value="D"),
             dict(name='EMA Window', type='int', value=0, step=1, limits=[0, None]),
-            dict(name='Volatility Type', type='list', limits=[]),
+            dict(name='Volatility Type', type='list', limits=["Garman Klass", "Standard Dev"], value="Garman Klass"),
             dict(name='Price Volatility', type='bool', value=True),
             dict(name='Yield Volatility', type='bool', value=True),
             # dict(name='Animation Speed', type='float', value=1.0, dec=True, step=0.1, limits=[0.0001, None]),
@@ -159,7 +185,6 @@ class Window(QMainWindow):
         self.params.param('Load Preset').sigValueChanged.connect(self.load_preset)
         self.params.param('Instruments').sigChildAdded.connect(self.instrument_add)
         self.params.param('Instruments').sigChildRemoved.connect(self.instrument_delete)
-
         self.params.param('Candles Window').sigValueChanged.connect(self.update_candles)
         self.params.param('EMA Window').sigValueChanged.connect(self.update_candles)
 
@@ -177,7 +202,7 @@ class Window(QMainWindow):
             new_instrument_isin = idx.name()
             bond = AppBond(new_instrument_isin)
             self.instruments[new_instrument_isin] = bond
-        # self.update_price_plot()
+        self.update_price_plot()
 
     def instrument_delete(self, child: InstrumentsGroupParam):
         to_delete = list(set(self.instruments.keys()) - set(child.current_instrument_names()))
@@ -217,11 +242,12 @@ class Window(QMainWindow):
             del state['children']['Load Preset..']['value']
         self.params.param('Instruments').clearChildren()
         self.params.restoreState(state, removeChildren=False)
-        # self.recalculate()
 
     def update_price_plot(self):
-        if not self.price_plot:
+        if not self.yield_plot:
             return
+
+        self.yield_plot.clear()
         self.price_plot.clear()
         for isin in self.instruments.keys():
             try:
@@ -244,25 +270,34 @@ class Window(QMainWindow):
             app_bond = self.instruments[isin]
             assert isinstance(app_bond, AppBond)
             yld_data = app_bond.get_current_yield_data()
+            prc_data = app_bond.get_current_price_data()
+
             x = yld_data['Date'].values.astype(np.int64) // 10 ** 9
             y = yld_data['Close'].values
-            self.price_plot.plot(x, y, pen=pen)
+
+            x2 = prc_data['Date'].values.astype(np.int64) // 10 ** 9
+            y2 = prc_data['Close'].values
+            self.yield_plot.plot(x, y, pen=pen)
+            self.price_plot.plot(x2, y2, pen=pen)
 
     def update_candles(self):
         for instrument_id, bond in self.instruments.items():
             assert isinstance(bond, AppBond)
-            df = bond.get_original_yield_data().copy()
+            data = [bond.get_original_yield_data().copy(), bond.get_original_price_data().copy()]
+            new_data = []
+            for df in data:
+                df = df.set_index('Date').resample(rule=self.params['Candles Window']).last()
+                df = df.dropna(thresh=4)
+                df = df.reset_index()
 
-            # Create candles according to selected temporal window:
-            df = df.set_index('Date').resample(rule=self.params['Candles Window']).last()
-            df = df.dropna(thresh=4)
-            df = df.reset_index()
+                # If EMA Window exists, transform:
+                if self.params['EMA Window'] >= 1:
+                    df = df.set_index('Date').ewm(span=self.params['EMA Window']).mean().reset_index()
+                new_data.append(df)
 
-            # If EMA Window exists, transform:
-            if self.params['EMA Window'] >= 1:
-                df = df.set_index('Date').ewm(span=self.params['EMA Window']).mean().reset_index()
+            bond.set_current_yield_data(new_data[0])
+            bond.set_current_price_data(new_data[1])
 
-            bond.set_current_yield_data(df)
         self.update_price_plot()
 
     def params_change_manager(self):
