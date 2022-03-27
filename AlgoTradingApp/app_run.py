@@ -63,6 +63,27 @@ class AppBond:
         selt._price_data = self._price_data_backup.copy()
 
 
+class InstrumentParam(ptypes.GroupParameter):
+    def __init__(self, **kwds):
+        name = kwds.get('IsinCode', 'Instrument')
+        auto_ic = True if name == 'Instrument' else False
+        defs = dict(
+            name=name, autoIncrementName=auto_ic, renamable=True, removable=True, children=[
+                dict(name='Plots', type='bool', value=True),
+                dict(name='Notional', type='float', value=0.0, step=100, limits=[-1e12, 1e12]),
+                dict(name='Style', type='list', limits=['Solid', 'Dashed', 'Dotted'], value='Solid'),
+                dict(name='Color', type='color', value=self.random_color(), default=(0, 0, 0)),
+            ])
+        ptypes.GroupParameter.__init__(self, **defs)
+        self.restoreState(kwds, removeChildren=False)
+
+    def instrument_name(self):
+        return [self.name()]
+
+    def random_color(self):
+        return tuple(np.random.randint(0, 255, 3))
+
+
 class InstrumentsGroupParam(ptypes.GroupParameter):
     def __init__(self):
         ptypes.GroupParameter.__init__(self, name="Instruments", addText="Add New..", addList=['Instrument'])
@@ -89,53 +110,7 @@ class InstrumentsGroupParam(ptypes.GroupParameter):
         self.set_options()
 
 
-class InstrumentParam(ptypes.GroupParameter):
-    def __init__(self, **kwds):
-        name = kwds.get('IsinCode', 'Instrument')
-        auto_ic = True if name == 'Instrument' else False
-        defs = dict(
-            name=name, autoIncrementName=auto_ic, renamable=True, removable=True, children=[
-                dict(name='Plots', type='bool', value=True),
-                dict(name='Notional', type='float', value=0.0, step=100, limits=[-1e12, 1e12]),
-                # AccelerationGroup(),
-                dict(name='Style', type='list', limits=['Solid', 'Dashed', 'Dotted'], value='Solid'),
-                dict(name='Color', type='color', value=self.random_color(), default=(0, 0, 0)),
-            ])
-        ptypes.GroupParameter.__init__(self, **defs)
-        self.restoreState(kwds, removeChildren=False)
-
-    def instrument_name(self):
-        return [self.name()]
-
-    def random_color(self):
-        return tuple(np.random.randint(0, 255, 3))
-
-
 ptypes.registerParameterType('Instrument', InstrumentParam)
-
-
-class AccelerationGroup(ptypes.GroupParameter):
-    def __init__(self, **kwds):
-        defs = dict(name="Acceleration", addText="Add Command..")
-        ptypes.GroupParameter.__init__(self, **defs)
-        self.restoreState(kwds, removeChildren=False)
-
-    def addNew(self, typ=None):
-        next_time = 0.0
-        if self.hasChildren():
-            next_time = self.children()[-1]['Proper Time'] + 1
-        self.addChild(
-            Parameter.create(name='Command', autoIncrementName=True, type=None, renamable=True, removable=True,
-                             children=[
-                                 dict(name='Proper Time', type='float', value=next_time),
-                                 dict(name='Acceleration', type='float', value=0.0, step=0.1),
-                             ]))
-
-    def generate(self):
-        prog = []
-        for cmd in self:
-            prog.append((cmd['Proper Time'], cmd['Acceleration']))
-        return prog
 
 
 class Window(QMainWindow):
@@ -213,7 +188,6 @@ class Window(QMainWindow):
         self.params.param('Instruments').sigChildRemoved.connect(self.instrument_delete)
         self.params.param('Candles Window').sigValueChanged.connect(self.update_candles)
         self.params.param('EMA Window').sigValueChanged.connect(self.update_candles)
-
         self.params.sigTreeStateChanged.connect(self.params_change_manager)
 
         preset_dir = os.path.join(os.path.abspath(os.path.dirname(sys.argv[0])), 'presets')
@@ -225,7 +199,7 @@ class Window(QMainWindow):
     def instrument_add(self, child, idx):
         is_generic = idx.name().startswith('Instrument')
         if not is_generic:
-            new_instrument_isin = idx.name()
+            new_instrument_isin = idx.name().split(' ')[0]
             bond = AppBond(new_instrument_isin)
             self.instruments[new_instrument_isin] = bond
         self.update_price_plot()
@@ -312,19 +286,43 @@ class Window(QMainWindow):
         # Pen Creation
         pen = pg.mkPen(color=(206, 241, 229))
 
-        volatility_x = np.zeros(len(self.instruments.keys()))
-        volatility_y = np.zeros(len(self.instruments.keys()))
+        volatility_x = []
+        volatility_y = []
+        yields_y = []
+
         for i, isin in enumerate(self.instruments.keys()):
             app_bond = self.instruments[isin]
             assert isinstance(app_bond, AppBond)
+
+            try:
+                isin_params = self.params.param('Instruments').param(isin)
+            except KeyError:
+                continue
+            if not isin_params['Plots']:
+                continue
+
             prc_data = app_bond.get_current_price_data()
+            yld_data = app_bond.get_current_yield_data()
+
+            try:
+                current_yld = yld_data.set_index('Date').loc['2022-03-25']['Close']
+            except KeyError:
+                continue
+
+            yields_y.append(current_yld)
             ytm = app_bond.bond.years_to_maturity()
             vola = prc_data['Close'].std()
-            volatility_x[i] = ytm
-            volatility_y[i] = vola
+            volatility_x.append(ytm)
+            volatility_y.append(vola)
 
-        self.yield_curve_plot.plot(volatility_x, volatility_x, symbol='o', pen=pen)
-        self.volatility_plot.plot(volatility_x, volatility_x, symbol='o', pen=pen)
+        volatility_x = np.array(volatility_x)
+        volatility_y = np.array(volatility_y)
+        yields_y = np.array(yields_y)
+
+        # Sort Arrays:
+        sorted_idx = np.argsort(volatility_x)
+        self.yield_curve_plot.plot(volatility_x[sorted_idx], yields_y[sorted_idx], symbol='o', pen=pen)
+        self.volatility_plot.plot(volatility_x[sorted_idx], volatility_y[sorted_idx], symbol='o', pen=pen)
 
     def update_candles(self):
         for instrument_id, bond in self.instruments.items():

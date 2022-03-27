@@ -1,6 +1,7 @@
 import QuantLib as ql
 import prettytable as pt
 import datetime as dt
+import numpy as np
 
 
 class FixedRateBond:
@@ -75,7 +76,10 @@ class FixedRateBond:
         if eval_date:
             self.set_evaluation_date(eval_date)
         self._set_pricing_engine(bond_yield)
-        return self.bond.cleanPrice()
+        try:
+            return self.bond.cleanPrice()
+        except RuntimeError:
+            return np.nan
 
     def dirty_price(self, bond_yield, eval_date=None):
         if eval_date:

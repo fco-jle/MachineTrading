@@ -1,0 +1,9 @@
+{
+  "IsinCode": "IT0005486748",
+  "LotSize": 1000,
+  "IssueDate": "2022-03-14",
+  "MaturityDate": "2023-03-14",
+  "CouponInterest": 0.0,
+  "CouponFrequency": "SemiAnnual",
+  "DayCountConvention": "Act/Act"
+}
