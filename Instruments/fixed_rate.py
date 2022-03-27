@@ -124,6 +124,12 @@ class FixedRateBond:
             self.compounding,
             self.frequency)
 
+    def years_to_maturity(self, eval_date=None):
+        eval_date = self._date_to_quantlib(dt.date.today()) if eval_date is None else self._date_to_quantlib(eval_date)
+        maturity = self.maturity_date
+        ytm = (maturity-eval_date)/365.25
+        return ytm
+
 
 if __name__ == '__main__':
     example = FixedRateBond(

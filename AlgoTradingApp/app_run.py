@@ -148,22 +148,48 @@ class Window(QMainWindow):
         self.objectGroup = InstrumentsGroupParam()
 
         # Plot Layout
+        self.setup_gui()
+
+        # Tree
+        self.setup_config()
+        self.tree = ParameterTree(showHeader=False)
+
+    def setup_gui(self):
+        self.vertical_splitter = QtWidgets.QSplitter()
+        self.vertical_splitter.setOrientation(QtCore.Qt.Orientation.Vertical)
+
         self.splitter = QtWidgets.QSplitter()
         self.splitter.setOrientation(QtCore.Qt.Orientation.Horizontal)
         self.ui.plotsLayout.addWidget(self.splitter)
 
+        # Configure Object Time Series Plots
         self.time_series_plots = pg.GraphicsLayoutWidget()
+        self.maturity_plot = pg.GraphicsLayoutWidget()
         self.splitter.addWidget(self.time_series_plots)
+        self.splitter.addWidget(self.maturity_plot)
+        self.splitter.setSizes([int(self.width() * 0.6), int(self.width() * 0.4)])
 
+        # Config Left Part of Splitter
         self.yield_plot = self.time_series_plots.addPlot(row=0, col=0, axisItems={'bottom': pg.DateAxisItem()})
         self.price_plot = self.time_series_plots.addPlot(row=1, col=0, axisItems={'bottom': pg.DateAxisItem()})
         self.price_plot.setXLink(self.yield_plot)
         self.yield_plot.showGrid(x=False, y=True)
         self.price_plot.showGrid(x=False, y=True)
+        self.yield_plot.setTitle("<font size='5'> Selected Instruments Yield</font>")
+        self.yield_plot.setLabels(left="<font size='4'>Yield</font>", bottom="<font size='4'>Datetime</font>")
+        self.price_plot.setTitle("<font size='5'> Selected Instruments Price</font>")
+        self.price_plot.setLabels(left="<font size='4'>Price</font>", bottom="<font size='4'>Datetime</font>")
 
-        # Tree
-        self.setup_config()
-        self.tree = ParameterTree(showHeader=False)
+        # Config Right Part of Splitter
+        self.yield_curve_plot = self.maturity_plot.addPlot(row=0, col=0)
+        self.volatility_plot = self.maturity_plot.addPlot(row=1, col=0)
+        self.volatility_plot.setXLink(self.yield_curve_plot)
+        self.yield_curve_plot.showGrid(x=False, y=True)
+        self.volatility_plot.showGrid(x=False, y=True)
+        self.yield_curve_plot.setTitle("<font size='5'> Yield Curve </font>")
+        self.yield_curve_plot.setLabels(left="<font size='4'>Yield</font>", bottom="<font size='4'>Maturity</font>")
+        self.volatility_plot.setTitle("<font size='5'> Volatility</font>")
+        self.volatility_plot.setLabels(left="<font size='4'>Volatility</font>", bottom="<font size='4'>Maturity</font>")
 
     def setup_config(self):
         self.tree = ParameterTree(showHeader=False)
@@ -263,7 +289,6 @@ class Window(QMainWindow):
             style_dict = {'Solid': None,
                           'Dotted': pg.QtCore.Qt.DotLine,
                           'Dashed': pg.QtCore.Qt.DashLine}
-
             rgb = isin_params['Color'].getRgb()
             pen = pg.mkPen(color=rgb[0:3], style=style_dict[isin_params['Style']])
 
@@ -279,6 +304,27 @@ class Window(QMainWindow):
             y2 = prc_data['Close'].values
             self.yield_plot.plot(x, y, pen=pen)
             self.price_plot.plot(x2, y2, pen=pen)
+
+    def update_maturity_plot(self):
+        self.yield_curve_plot.clear()
+        self.volatility_plot.clear()
+
+        # Pen Creation
+        pen = pg.mkPen(color=(206, 241, 229))
+
+        volatility_x = np.zeros(len(self.instruments.keys()))
+        volatility_y = np.zeros(len(self.instruments.keys()))
+        for i, isin in enumerate(self.instruments.keys()):
+            app_bond = self.instruments[isin]
+            assert isinstance(app_bond, AppBond)
+            prc_data = app_bond.get_current_price_data()
+            ytm = app_bond.bond.years_to_maturity()
+            vola = prc_data['Close'].std()
+            volatility_x[i] = ytm
+            volatility_y[i] = vola
+
+        self.yield_curve_plot.plot(volatility_x, volatility_x, symbol='o', pen=pen)
+        self.volatility_plot.plot(volatility_x, volatility_x, symbol='o', pen=pen)
 
     def update_candles(self):
         for instrument_id, bond in self.instruments.items():
@@ -302,6 +348,7 @@ class Window(QMainWindow):
 
     def params_change_manager(self):
         self.update_price_plot()
+        self.update_maturity_plot()
 
 
 if __name__ == "__main__":
