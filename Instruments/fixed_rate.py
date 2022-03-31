@@ -5,7 +5,7 @@ import numpy as np
 
 
 class FixedRateBond:
-    def __init__(self, issue_date, maturity_date, coupon, settlement_days=1):
+    def __init__(self, issue_date, maturity_date, coupon, settlement_days=2):
         self.settlementDays = settlement_days
         face_amount = 100.0
         self.issue_date = self._date_to_quantlib(issue_date)
@@ -17,30 +17,19 @@ class FixedRateBond:
         convention = ql.Unadjusted
         maturity_date_convention = convention
         rule = ql.DateGeneration.Backward
-
-        end_of_month = False
-        schedule = ql.Schedule(
-            self.issue_date,
-            self.maturity_date,
-            tenor,
-            self.calendar,
-            convention,
-            maturity_date_convention,
-            rule,
-            end_of_month)
-
         coupons = ql.DoubleVector(1)
         coupons[0] = coupon / 100.0
-        self.accrualDayCounter = ql.ActualActual(ql.ActualActual.Bond, schedule)
         payment_convention = ql.Unadjusted
+        end_of_month = True
 
-        self.bond = ql.FixedRateBond(
-            self.settlementDays,
-            face_amount,
-            schedule,
-            coupons,
-            self.accrualDayCounter,
-            payment_convention)
+        schedule = ql.Schedule(self.issue_date, self.maturity_date,
+                               tenor, self.calendar, convention, maturity_date_convention,
+                               rule, end_of_month)
+        self.accrualDayCounter = ql.ActualActual(ql.ActualActual.Bond, schedule)
+        self.bond = ql.FixedRateBond(self.settlementDays, face_amount,
+                                     schedule, coupons, self.accrualDayCounter,
+                                     payment_convention, 100.0, self.issue_date)
+        self.cash_flows()
 
     @staticmethod
     def _date_to_quantlib(date):
@@ -67,7 +56,8 @@ class FixedRateBond:
                 bond_yield,
                 self.accrualDayCounter,
                 self.compounding,
-                self.frequency))
+                ql.Annual))
+
         term_structure.enableExtrapolation()
         engine = ql.DiscountingBondEngine(term_structure)
         self.bond.setPricingEngine(engine)
@@ -131,32 +121,49 @@ class FixedRateBond:
     def years_to_maturity(self, eval_date=None):
         eval_date = self._date_to_quantlib(dt.date.today()) if eval_date is None else self._date_to_quantlib(eval_date)
         maturity = self.maturity_date
-        ytm = (maturity-eval_date)/365.25
+        ytm = (maturity - eval_date) / 365.25
         return ytm
+
+    def bond_yield(self, price, eval_date=None):
+        if eval_date:
+            self.set_evaluation_date(eval_date)
+        yld = self.bond.bondYield(price, self.accrualDayCounter, self.compounding, ql.Annual)
+        return yld
+
+    def futures_contract_conversion_factor(self, bond_price, futures_price, futures_coupon=0.06, eval_date=None):
+        cf = self.clean_price(bond_yield=futures_coupon, eval_date=eval_date) / 100
+        adjusted_futures_price = futures_price * cf
+        basis = bond_price - adjusted_futures_price
+        return cf, basis
 
 
 if __name__ == '__main__':
-    example = FixedRateBond(
-        issue_date=ql.Date(1, 3, 2015),
-        maturity_date=ql.Date(1, 3, 2032),
-        coupon=1.650,
-        settlement_days=1)
+    basket = [(0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020), 90.81),
+              (0.60, ql.Date(1, 8, 2031), ql.Date(23, 2, 2021), 88.5),
+              (0.95, ql.Date(1, 12, 2031), ql.Date(1, 6, 2021), 91.0),
+              (0.95, ql.Date(1, 6, 2032), ql.Date(1, 11, 2021), 90.09)]
 
-    ex_yield = 0.0179
+    securities = []
+    min_basis = 100
+    min_basis_index = -1
+    calc_date = ql.Date(30, 3, 2022)
+    f_price = 137.13
+    for i, b in enumerate(basket):
+        coupon, maturity, issue, price = b
+        s = FixedRateBond(issue, maturity, coupon, settlement_days=2)
+        cf, basis = s.futures_contract_conversion_factor(bond_price=price, futures_price=f_price, eval_date=calc_date)
+        if basis < min_basis:
+            min_basis = basis
+            min_basis_index = i
+        securities.append((s, cf))
 
-    example.cash_flows()
-    c_price = example.clean_price(ex_yield)
-    d_price = example.dirty_price(ex_yield)
-    acc_amount = example.accrued_amount(ex_yield)
+    ctd_info = basket[min_basis_index]
+    ctd_bond, ctd_cf = securities[min_basis_index]
+    ctd_price = ctd_info[3]
 
-    dur_simp = example.duration_simple(ex_yield)
-    dur_mod = example.duration_modified(ex_yield)
-    dur_mac = example.duration_macaulay(ex_yield)
-
-    tabDuration = pt.PrettyTable(['Item', 'Value'])
-    tabDuration.add_row(['Clean Price', c_price])
-    tabDuration.add_row(['Dirty Price', d_price])
-    tabDuration.add_row(['Accrued Amount', acc_amount])
-    tabDuration.add_row(['Duration Simple', dur_simp])
-    tabDuration.add_row(['Duration Modified', dur_mod])
-    tabDuration.add_row(['Duration Macaulay', dur_mac])
+    print("%-30s = %lf" % ("Minimum Basis", min_basis))
+    print("%-30s = %lf" % ("Conversion Factor", ctd_cf))
+    print("%-30s = %lf" % ("Coupon", ctd_info[0]))
+    print("%-30s = %s" % ("Maturity", ctd_info[1]))
+    print("%-30s = %lf" % ("Price", ctd_info[3]))
+    securities
