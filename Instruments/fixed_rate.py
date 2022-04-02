@@ -5,7 +5,7 @@ import numpy as np
 
 
 class FixedRateBond:
-    def __init__(self, issue_date, maturity_date, coupon, settlement_days=2):
+    def __init__(self, issue_date, maturity_date, coupon, settlement_days=2, calendar=None):
         self.settlementDays = settlement_days
         face_amount = 100.0
         self.issue_date = self._date_to_quantlib(issue_date)
@@ -13,13 +13,14 @@ class FixedRateBond:
         self.frequency = ql.Semiannual
         self.compounding = ql.Compounded
         tenor = ql.Period(ql.Semiannual)
-        self.calendar = ql.Italy()
+
+        self.calendar = calendar if calendar is not None else ql.NullCalendar()
         convention = ql.Unadjusted
         maturity_date_convention = convention
         rule = ql.DateGeneration.Backward
         coupons = ql.DoubleVector(1)
         coupons[0] = coupon / 100.0
-        payment_convention = ql.Unadjusted
+        payment_convention = ql.ModifiedFollowing
         end_of_month = True
 
         schedule = ql.Schedule(self.issue_date, self.maturity_date,
@@ -28,8 +29,7 @@ class FixedRateBond:
         self.accrualDayCounter = ql.ActualActual(ql.ActualActual.Bond, schedule)
         self.bond = ql.FixedRateBond(self.settlementDays, face_amount,
                                      schedule, coupons, self.accrualDayCounter,
-                                     payment_convention, 100.0, self.issue_date)
-        self.cash_flows()
+                                     payment_convention)
 
     @staticmethod
     def _date_to_quantlib(date):
@@ -66,10 +66,8 @@ class FixedRateBond:
         if eval_date:
             self.set_evaluation_date(eval_date)
         self._set_pricing_engine(bond_yield)
-        try:
-            return self.bond.cleanPrice()
-        except RuntimeError:
-            return np.nan
+        prc = self.bond.cleanPrice(bond_yield, ql.ActualActual(ql.ActualActual.Bond), ql.Compounded, ql.Annual)
+        return prc
 
     def dirty_price(self, bond_yield, eval_date=None):
         if eval_date:
@@ -130,28 +128,37 @@ class FixedRateBond:
         yld = self.bond.bondYield(price, self.accrualDayCounter, self.compounding, ql.Annual)
         return yld
 
-    def futures_contract_conversion_factor(self, bond_price, futures_price, futures_coupon=0.06, eval_date=None):
-        cf = self.clean_price(bond_yield=futures_coupon, eval_date=eval_date) / 100
+    def futures_contract_conversion_factor(self, bond_price, futures_price, futures_delivery_date, futures_coupon=0.06):
+        """
+        The Conversion Factor for a cash Treasury security is the price of that security that would makes
+        its yield to the futures delivery date equal to its coupon rate.
+        """
+        cf = self.clean_price(bond_yield=futures_coupon, eval_date=futures_delivery_date) / 100
         adjusted_futures_price = futures_price * cf
         basis = bond_price - adjusted_futures_price
         return cf, basis
 
 
 if __name__ == '__main__':
-    basket = [(0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020), 90.81),
-              (0.60, ql.Date(1, 8, 2031), ql.Date(23, 2, 2021), 88.5),
-              (0.95, ql.Date(1, 12, 2031), ql.Date(1, 6, 2021), 91.0),
-              (0.95, ql.Date(1, 6, 2032), ql.Date(1, 11, 2021), 90.09)]
+
+    # A día 2022-04-01
+    date = ql.Date(1, 4, 2022)
+    basket = [(0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020), 90.81),  # IT0005422891  ->  0.659620
+              (0.60, ql.Date(1, 8, 2031), ql.Date(23, 2, 2021), 88.5),  # IT0005436693  ->  0.628867
+              (0.95, ql.Date(1, 12, 2031), ql.Date(1, 6, 2021), 91.0),  # IT0005449969  ->  0.643888
+              (0.95, ql.Date(1, 6, 2032), ql.Date(1, 11, 2021), 90.09)  # IT0005466013  ->  0.630012
+              ]
+    f_price = 137.54
+    f_delivery = ql.Date(10,6,2022)
 
     securities = []
     min_basis = 100
     min_basis_index = -1
-    calc_date = ql.Date(30, 3, 2022)
-    f_price = 137.13
     for i, b in enumerate(basket):
         coupon, maturity, issue, price = b
-        s = FixedRateBond(issue, maturity, coupon, settlement_days=2)
-        cf, basis = s.futures_contract_conversion_factor(bond_price=price, futures_price=f_price, eval_date=calc_date)
+        s = FixedRateBond(issue, maturity, coupon, settlement_days=0, calendar=ql.Germany())
+        cf, basis = s.futures_contract_conversion_factor(bond_price=price, futures_price=f_price,
+                                                         futures_delivery_date=f_delivery)
         if basis < min_basis:
             min_basis = basis
             min_basis_index = i
@@ -166,4 +173,3 @@ if __name__ == '__main__':
     print("%-30s = %lf" % ("Coupon", ctd_info[0]))
     print("%-30s = %s" % ("Maturity", ctd_info[1]))
     print("%-30s = %lf" % ("Price", ctd_info[3]))
-    securities
