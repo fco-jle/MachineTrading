@@ -5,14 +5,17 @@ import numpy as np
 
 
 class FixedRateBond:
-    def __init__(self, issue_date, maturity_date, coupon, settlement_days=2, calendar=None):
+    def __init__(self, issue_date, maturity_date, coupon, settlement_days=2,
+                 calendar=None, payment_convention=None, end_of_month=False,
+                 coupon_period=ql.Semiannual):
+
         self.settlementDays = settlement_days
         face_amount = 100.0
         self.issue_date = self._date_to_quantlib(issue_date)
         self.maturity_date = self._date_to_quantlib(maturity_date)
         self.frequency = ql.Semiannual
         self.compounding = ql.Compounded
-        tenor = ql.Period(ql.Semiannual)
+        tenor = ql.Period(coupon_period)
 
         self.calendar = calendar if calendar is not None else ql.NullCalendar()
         convention = ql.Unadjusted
@@ -20,12 +23,10 @@ class FixedRateBond:
         rule = ql.DateGeneration.Backward
         coupons = ql.DoubleVector(1)
         coupons[0] = coupon / 100.0
-        payment_convention = ql.ModifiedFollowing
-        end_of_month = True
+        payment_convention = payment_convention if payment_convention else ql.Unadjusted
 
-        schedule = ql.Schedule(self.issue_date, self.maturity_date,
-                               tenor, self.calendar, convention, maturity_date_convention,
-                               rule, end_of_month)
+        schedule = ql.Schedule(self.issue_date, self.maturity_date, tenor, self.calendar,
+                               convention, maturity_date_convention, rule, end_of_month)
         self.accrualDayCounter = ql.ActualActual(ql.ActualActual.Bond, schedule)
         self.bond = ql.FixedRateBond(self.settlementDays, face_amount,
                                      schedule, coupons, self.accrualDayCounter,
@@ -48,16 +49,12 @@ class FixedRateBond:
         for c in self.bond.cashflows():
             print('%20s %12f' % (c.date(), c.amount()))
 
-    def _set_pricing_engine(self, bond_yield):
-        term_structure = ql.YieldTermStructureHandle(
-            ql.FlatForward(
-                self.settlementDays,
-                self.calendar,
-                bond_yield,
-                self.accrualDayCounter,
-                self.compounding,
-                ql.Annual))
-
+    def _set_pricing_engine(self, bond_yield, day_counter=None, compounding_period=None):
+        compounding_period = compounding_period if compounding_period is not None else ql.Annual
+        accrual_day_counter = day_counter if day_counter is not None else self.accrualDayCounter
+        flat_curve = ql.FlatForward(self.settlementDays, self.calendar, bond_yield, accrual_day_counter,
+                                    self.compounding, compounding_period)
+        term_structure = ql.YieldTermStructureHandle(flat_curve)
         term_structure.enableExtrapolation()
         engine = ql.DiscountingBondEngine(term_structure)
         self.bond.setPricingEngine(engine)
@@ -65,8 +62,7 @@ class FixedRateBond:
     def clean_price(self, bond_yield, eval_date=None):
         if eval_date:
             self.set_evaluation_date(eval_date)
-        self._set_pricing_engine(bond_yield)
-        prc = self.bond.cleanPrice(bond_yield, ql.ActualActual(ql.ActualActual.Bond), ql.Compounded, ql.Annual)
+        prc = self.bond.cleanPrice(bond_yield, self.accrualDayCounter, ql.Compounded, ql.Annual)
         return prc
 
     def dirty_price(self, bond_yield, eval_date=None):
@@ -75,9 +71,28 @@ class FixedRateBond:
         self._set_pricing_engine(bond_yield)
         return self.bond.dirtyPrice()
 
-    def accrued_amount(self, bond_yield):
+    def NPV(self, bond_yield, eval_date=None):
+        if eval_date:
+            self.set_evaluation_date(eval_date)
         self._set_pricing_engine(bond_yield)
-        return self.bond.accruedAmount()
+        npv = self.bond.NPV()
+        return npv
+
+    def DV01_from_yield(self, bond_yield, eval_date=None):
+        p1 = self.clean_price(bond_yield=bond_yield, eval_date=eval_date)
+        p2 = self.clean_price(bond_yield=bond_yield + 0.01 / 100, eval_date=eval_date)
+        dv01 = p1 - p2
+        return dv01
+
+    def DV01_from_price(self, price, eval_date=None):
+        yld = self.bond_yield(price, eval_date)
+        yld2 = yld + 0.01/100
+        p2 = self.clean_price(yld2, eval_date)
+        dv01 = p1 - p2
+        return dv01
+
+    def accrued_amount(self, eval_date=None):
+        return self.bond.accruedAmount(eval_date)
 
     def duration(self, bond_yield, kind=ql.Duration.Simple):
         return ql.BondFunctions.duration(
@@ -139,37 +154,147 @@ class FixedRateBond:
         return cf, basis
 
 
+class BTP(FixedRateBond):
+    def __init__(self, issue_date, maturity_date, coupon, settlement_days=2):
+        super(BTP, self).__init__(
+            issue_date=issue_date,
+            maturity_date=maturity_date,
+            coupon=coupon,
+            settlement_days=settlement_days,
+            calendar=ql.NullCalendar(),
+            payment_convention=ql.ModifiedFollowing,
+            end_of_month=True
+        )
+
+
+class FixedRateBondEurex(FixedRateBond):
+    def __init__(self, issue_date, maturity_date, coupon):
+        super(FixedRateBondEurex, self).__init__(
+            issue_date=issue_date,
+            maturity_date=maturity_date,
+            coupon=coupon,
+            settlement_days=0,
+            calendar=ql.Germany(),
+            payment_convention=ql.ModifiedFollowing,
+            end_of_month=False
+        )
+
+    def clean_price(self, bond_yield, eval_date=None):
+        if eval_date:
+            self.set_evaluation_date(eval_date)
+        prc = self.bond.cleanPrice(bond_yield, self.accrualDayCounter, ql.Compounded, ql.Annual)
+        return prc
+
+
+class FixedRateBondForward:
+    def __init__(self, maturity_date, settlement_days=0):
+        futures = ql.FixedRateBondForward(calc_date, maturity_date,
+                                          ql.Position.Long, 0.0,
+                                          settlement_days,
+                                          day_count,
+                                          calendar,
+                                          business_convention,
+                                          ctd_bond,
+                                          yield_curve_handle,
+                                          yield_curve_handle
+                                          )
+
+    def implied_yield(self, price, ctd_price, ctd_cf):
+        implied_yield = futures.impliedYield(ctd_price / ctd_cf,
+                                             price,
+                                             calc_date,
+                                             ql.Compounded,
+                                             day_count
+                                             ).rate()
+        return implied_yield
+
+
 if __name__ == '__main__':
+    TEST = 'ComputePrice'
+    # TEST = 'ForwardYield'
+    # TEST = 'CTD'
 
-    # A día 2022-04-01
-    date = ql.Date(1, 4, 2022)
-    basket = [(0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020), 90.81),  # IT0005422891  ->  0.659620
-              (0.60, ql.Date(1, 8, 2031), ql.Date(23, 2, 2021), 88.5),  # IT0005436693  ->  0.628867
-              (0.95, ql.Date(1, 12, 2031), ql.Date(1, 6, 2021), 91.0),  # IT0005449969  ->  0.643888
-              (0.95, ql.Date(1, 6, 2032), ql.Date(1, 11, 2021), 90.09)  # IT0005466013  ->  0.630012
-              ]
-    f_price = 137.54
-    f_delivery = ql.Date(10,6,2022)
+    if TEST == 'ForwardYield':
+        """
+        The Yield for a futures contract is calculated as the yield to maturity of a cash security with the following 
+        specifications:
+        - Settlement Date = last delivery day for the futures contract
+        - Maturity Date = maturity date of the CTD cash security
+        - Coupon Rate = coupon rate per annum of the CTD cash security
+        - Bond Price = (futures price * conversion factor for CTD cash security) + (accrued Coupon interest on CTD 
+                                                                                    cash security, from latest Coupon 
+                                                                                    payment date to Settlement Date)
+        - Coupon Frequency = (Coupon Rate / 2) paid semiannually
+        - Day Count Basis = (actual / actual)
+        - Par Value = 100
+        """
 
-    securities = []
-    min_basis = 100
-    min_basis_index = -1
-    for i, b in enumerate(basket):
-        coupon, maturity, issue, price = b
-        s = FixedRateBond(issue, maturity, coupon, settlement_days=0, calendar=ql.Germany())
-        cf, basis = s.futures_contract_conversion_factor(bond_price=price, futures_price=f_price,
-                                                         futures_delivery_date=f_delivery)
-        if basis < min_basis:
-            min_basis = basis
-            min_basis_index = i
-        securities.append((s, cf))
+        coupon, maturity, issue, price = (0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020), 90.81)
+        f_price = 137.54
+        f_delivery = ql.Date(10, 6, 2022)
+        settle = f_delivery
 
-    ctd_info = basket[min_basis_index]
-    ctd_bond, ctd_cf = securities[min_basis_index]
-    ctd_price = ctd_info[3]
+        s = FixedRateBondEurex(issue, maturity, coupon)
+        cf, basis = s.futures_contract_conversion_factor(price, f_price, f_delivery, 0.06)
+        expected_bond_price = (f_price * cf) + s.accrued_amount(f_delivery)
+        fwd_yld = s.bond_yield(price=expected_bond_price, eval_date=settle)
 
-    print("%-30s = %lf" % ("Minimum Basis", min_basis))
-    print("%-30s = %lf" % ("Conversion Factor", ctd_cf))
-    print("%-30s = %lf" % ("Coupon", ctd_info[0]))
-    print("%-30s = %s" % ("Maturity", ctd_info[1]))
-    print("%-30s = %lf" % ("Price", ctd_info[3]))
+    if TEST == 'ComputePrice':
+        coupon, maturity, issue = (0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020))
+        s2 = BTP(issue, maturity, coupon)
+        test = s2.bond_yield(price=91.04, eval_date=ql.Date(1, 4, 2022))  # 2.0
+        test2 = s2.clean_price(bond_yield=0.02, eval_date=ql.Date(1, 4, 2022))  # 91.04
+        test3 = s2.NPV(bond_yield=0.02, eval_date=ql.Date(1, 4, 2022))
+
+        p1 = s2.clean_price(bond_yield=2.0 / 100, eval_date=ql.Date(1, 4, 2022))
+        p2 = s2.clean_price(bond_yield=2.01 / 100, eval_date=ql.Date(1, 4, 2022))
+        dv01 = p1-p2
+
+        print("%-15s = %lf" % ("Expected Price", 91.04))
+        print("%-15s = %lf" % ("Expected Yield", 2.0))
+        print("%-15s = %lf" % ("Bond Yield", round(test * 100, 2)))
+        print("%-15s = %lf" % ("Clean Price", test2))
+        print("%-15s = %lf" % ("NPV", test3))
+        print("")
+
+    if TEST == 'CTD':
+        """
+        The holder of a short position in a Treasury futures contract must deliver a cash Treasury security to the 
+        holder of the offsetting long futures position upon contract expiration.  There are typically several cash 
+        securities available that fulfill the specification of the futures contract.  Because of accrued interest, 
+        differing maturities, etc. of the various cash securities, there are differing cash flows associated with 
+        the deliver process.  The cash security with the lowest cash flow cost is known as the Cheapest to Deliver.
+        """
+
+        # A día 2022-04-01
+        date = ql.Date(1, 4, 2022)
+        basket = [(0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020), 90.81),  # IT0005422891  ->  0.659620
+                  (0.60, ql.Date(1, 8, 2031), ql.Date(23, 2, 2021), 88.5),  # IT0005436693  ->  0.628867
+                  (0.95, ql.Date(1, 12, 2031), ql.Date(1, 6, 2021), 91.0),  # IT0005449969  ->  0.643888
+                  (0.95, ql.Date(1, 6, 2032), ql.Date(1, 11, 2021), 90.09)  # IT0005466013  ->  0.630012
+                  ]
+        f_price = 137.54
+        f_delivery = ql.Date(10, 6, 2022)
+
+        securities = []
+        min_basis = 100
+        min_basis_index = -1
+        for i, b in enumerate(basket):
+            coupon, maturity, issue, price = b
+            s = FixedRateBondEurex(issue, maturity, coupon)
+            cf, basis = s.futures_contract_conversion_factor(bond_price=price, futures_price=f_price,
+                                                             futures_delivery_date=f_delivery)
+            if basis < min_basis:
+                min_basis = basis
+                min_basis_index = i
+            securities.append((s, cf))
+
+        ctd_info = basket[min_basis_index]
+        ctd_bond, ctd_cf = securities[min_basis_index]
+        ctd_price = ctd_info[3]
+
+        print("%-30s = %lf" % ("Minimum Basis", min_basis))
+        print("%-30s = %lf" % ("Conversion Factor", ctd_cf))
+        print("%-30s = %lf" % ("Coupon", ctd_info[0]))
+        print("%-30s = %s" % ("Maturity", ctd_info[1]))
+        print("%-30s = %lf" % ("Price", ctd_info[3]))
