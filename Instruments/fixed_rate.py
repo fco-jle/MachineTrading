@@ -13,9 +13,9 @@ class FixedRateBond:
         face_amount = 100.0
         self.issue_date = self._date_to_quantlib(issue_date)
         self.maturity_date = self._date_to_quantlib(maturity_date)
-        self.frequency = ql.Semiannual
+        self.frequency = coupon_period
         self.compounding = ql.Compounded
-        tenor = ql.Period(coupon_period)
+        tenor = ql.Period(self.frequency)
 
         self.calendar = calendar if calendar is not None else ql.NullCalendar()
         convention = ql.Unadjusted
@@ -71,24 +71,22 @@ class FixedRateBond:
         self._set_pricing_engine(bond_yield)
         return self.bond.dirtyPrice()
 
-    def NPV(self, bond_yield, eval_date=None):
+    def npv(self, bond_yield, eval_date=None):
         if eval_date:
             self.set_evaluation_date(eval_date)
         self._set_pricing_engine(bond_yield)
         npv = self.bond.NPV()
         return npv
 
-    def DV01_from_yield(self, bond_yield, eval_date=None):
+    def dv01_from_yield(self, bond_yield, eval_date=None):
         p1 = self.clean_price(bond_yield=bond_yield, eval_date=eval_date)
         p2 = self.clean_price(bond_yield=bond_yield + 0.01 / 100, eval_date=eval_date)
         dv01 = p1 - p2
         return dv01
 
-    def DV01_from_price(self, price, eval_date=None):
+    def dv01_from_price(self, price, eval_date=None):
         yld = self.bond_yield(price, eval_date)
-        yld2 = yld + 0.01/100
-        p2 = self.clean_price(yld2, eval_date)
-        dv01 = p1 - p2
+        dv01 = p1 - self.clean_price(yld + 0.01/100, eval_date)
         return dv01
 
     def accrued_amount(self, eval_date=None):
@@ -133,8 +131,7 @@ class FixedRateBond:
 
     def years_to_maturity(self, eval_date=None):
         eval_date = self._date_to_quantlib(dt.date.today()) if eval_date is None else self._date_to_quantlib(eval_date)
-        maturity = self.maturity_date
-        ytm = (maturity - eval_date) / 365.25
+        ytm = (self.maturity_date - eval_date) / 365.25
         return ytm
 
     def bond_yield(self, price, eval_date=None):
@@ -166,6 +163,23 @@ class BTP(FixedRateBond):
             end_of_month=True
         )
 
+    def _set_pricing_engine(self, bond_yield, day_counter=None, compounding_period=None, settlement_days=None):
+        compounding_period = compounding_period if compounding_period is not None else ql.Annual
+        accrual_day_counter = day_counter if day_counter is not None else self.accrualDayCounter
+        settlement_days = settlement_days if settlement_days is not None else self.settlementDays
+        flat_curve = ql.FlatForward(settlement_days, self.calendar, bond_yield, accrual_day_counter,
+                                    self.compounding, compounding_period)
+        term_structure = ql.YieldTermStructureHandle(flat_curve)
+        term_structure.enableExtrapolation()
+        engine = ql.DiscountingBondEngine(term_structure)
+        self.bond.setPricingEngine(engine)
+
+    def clean_price(self, bond_yield, eval_date=None):
+        if eval_date:
+            self.set_evaluation_date(eval_date)
+        prc = self.bond.cleanPrice(bond_yield, self.accrualDayCounter, ql.Compounded, ql.Annual)
+        return prc
+
 
 class FixedRateBondEurex(FixedRateBond):
     def __init__(self, issue_date, maturity_date, coupon):
@@ -184,29 +198,6 @@ class FixedRateBondEurex(FixedRateBond):
             self.set_evaluation_date(eval_date)
         prc = self.bond.cleanPrice(bond_yield, self.accrualDayCounter, ql.Compounded, ql.Annual)
         return prc
-
-
-class FixedRateBondForward:
-    def __init__(self, maturity_date, settlement_days=0):
-        futures = ql.FixedRateBondForward(calc_date, maturity_date,
-                                          ql.Position.Long, 0.0,
-                                          settlement_days,
-                                          day_count,
-                                          calendar,
-                                          business_convention,
-                                          ctd_bond,
-                                          yield_curve_handle,
-                                          yield_curve_handle
-                                          )
-
-    def implied_yield(self, price, ctd_price, ctd_cf):
-        implied_yield = futures.impliedYield(ctd_price / ctd_cf,
-                                             price,
-                                             calc_date,
-                                             ql.Compounded,
-                                             day_count
-                                             ).rate()
-        return implied_yield
 
 
 if __name__ == '__main__':
@@ -241,14 +232,10 @@ if __name__ == '__main__':
 
     if TEST == 'ComputePrice':
         coupon, maturity, issue = (0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020))
-        s2 = BTP(issue, maturity, coupon)
+        s2 = BTP(issue, maturity, coupon, settlement_days=2)
         test = s2.bond_yield(price=91.04, eval_date=ql.Date(1, 4, 2022))  # 2.0
         test2 = s2.clean_price(bond_yield=0.02, eval_date=ql.Date(1, 4, 2022))  # 91.04
         test3 = s2.NPV(bond_yield=0.02, eval_date=ql.Date(1, 4, 2022))
-
-        p1 = s2.clean_price(bond_yield=2.0 / 100, eval_date=ql.Date(1, 4, 2022))
-        p2 = s2.clean_price(bond_yield=2.01 / 100, eval_date=ql.Date(1, 4, 2022))
-        dv01 = p1-p2
 
         print("%-15s = %lf" % ("Expected Price", 91.04))
         print("%-15s = %lf" % ("Expected Yield", 2.0))
