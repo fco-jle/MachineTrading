@@ -49,32 +49,43 @@ class FixedRateBond:
         for c in self.bond.cashflows():
             print('%20s %12f' % (c.date(), c.amount()))
 
-    def _set_pricing_engine(self, bond_yield, day_counter=None, compounding_period=None):
+    def _set_pricing_engine(self, bond_yield, day_counter=None, compounding_period=None, settlement_days=None):
         compounding_period = compounding_period if compounding_period is not None else ql.Annual
         accrual_day_counter = day_counter if day_counter is not None else self.accrualDayCounter
-        flat_curve = ql.FlatForward(self.settlementDays, self.calendar, bond_yield, accrual_day_counter,
-                                    self.compounding, compounding_period)
+        settlement_days = settlement_days if settlement_days is not None else self.settlementDays
+        flat_curve = ql.FlatForward(settlement_days,
+                                    self.calendar,
+                                    bond_yield,
+                                    accrual_day_counter,
+                                    self.compounding,
+                                    compounding_period)
         term_structure = ql.YieldTermStructureHandle(flat_curve)
         term_structure.enableExtrapolation()
         engine = ql.DiscountingBondEngine(term_structure)
         self.bond.setPricingEngine(engine)
 
+    def bond_yield(self, price, eval_date=None):
+        if eval_date:
+            self.set_evaluation_date(eval_date)
+        yld = self.bond.bondYield(price, self.accrualDayCounter, self.compounding, ql.Annual)
+        return yld
+
     def clean_price(self, bond_yield, eval_date=None):
         if eval_date:
             self.set_evaluation_date(eval_date)
-        prc = self.bond.cleanPrice(bond_yield, self.accrualDayCounter, ql.Compounded, ql.Annual)
+        prc = self.bond.cleanPrice(bond_yield, self.accrualDayCounter, self.compounding, ql.Annual)
         return prc
 
     def dirty_price(self, bond_yield, eval_date=None):
         if eval_date:
             self.set_evaluation_date(eval_date)
-        self._set_pricing_engine(bond_yield)
-        return self.bond.dirtyPrice()
+        prc = self.bond.dirtyPrice(bond_yield, self.accrualDayCounter, self.compounding, ql.Annual)
+        return prc
 
     def npv(self, bond_yield, eval_date=None):
         if eval_date:
             self.set_evaluation_date(eval_date)
-        self._set_pricing_engine(bond_yield)
+        self._set_pricing_engine(bond_yield, day_counter=self.accrualDayCounter, compounding_period=ql.Annual)
         npv = self.bond.NPV()
         return npv
 
@@ -134,12 +145,6 @@ class FixedRateBond:
         ytm = (self.maturity_date - eval_date) / 365.25
         return ytm
 
-    def bond_yield(self, price, eval_date=None):
-        if eval_date:
-            self.set_evaluation_date(eval_date)
-        yld = self.bond.bondYield(price, self.accrualDayCounter, self.compounding, ql.Annual)
-        return yld
-
     def futures_contract_conversion_factor(self, bond_price, futures_price, futures_delivery_date, futures_coupon=0.06):
         """
         The Conversion Factor for a cash Treasury security is the price of that security that would makes
@@ -162,23 +167,6 @@ class BTP(FixedRateBond):
             payment_convention=ql.ModifiedFollowing,
             end_of_month=True
         )
-
-    def _set_pricing_engine(self, bond_yield, day_counter=None, compounding_period=None, settlement_days=None):
-        compounding_period = compounding_period if compounding_period is not None else ql.Annual
-        accrual_day_counter = day_counter if day_counter is not None else self.accrualDayCounter
-        settlement_days = settlement_days if settlement_days is not None else self.settlementDays
-        flat_curve = ql.FlatForward(settlement_days, self.calendar, bond_yield, accrual_day_counter,
-                                    self.compounding, compounding_period)
-        term_structure = ql.YieldTermStructureHandle(flat_curve)
-        term_structure.enableExtrapolation()
-        engine = ql.DiscountingBondEngine(term_structure)
-        self.bond.setPricingEngine(engine)
-
-    def clean_price(self, bond_yield, eval_date=None):
-        if eval_date:
-            self.set_evaluation_date(eval_date)
-        prc = self.bond.cleanPrice(bond_yield, self.accrualDayCounter, ql.Compounded, ql.Annual)
-        return prc
 
 
 class FixedRateBondEurex(FixedRateBond):
@@ -229,19 +217,40 @@ if __name__ == '__main__':
         cf, basis = s.futures_contract_conversion_factor(price, f_price, f_delivery, 0.06)
         expected_bond_price = (f_price * cf) + s.accrued_amount(f_delivery)
         fwd_yld = s.bond_yield(price=expected_bond_price, eval_date=settle)
+        print("%-15s = %lf" % ("Forward Price", f_price))
+        print("%-15s = %lf" % ("Forward Yield", fwd_yld*100))
 
     if TEST == 'ComputePrice':
         coupon, maturity, issue = (0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020))
-        s2 = BTP(issue, maturity, coupon, settlement_days=2)
+        s2 = BTP(issue, maturity, coupon)
         test = s2.bond_yield(price=91.04, eval_date=ql.Date(1, 4, 2022))  # 2.0
-        test2 = s2.clean_price(bond_yield=0.02, eval_date=ql.Date(1, 4, 2022))  # 91.04
-        test3 = s2.NPV(bond_yield=0.02, eval_date=ql.Date(1, 4, 2022))
+        test2 = s2.clean_price(bond_yield=test, eval_date=ql.Date(1, 4, 2022))  # 91.04
+        test4 = s2.dirty_price(bond_yield=test, eval_date=ql.Date(1, 4, 2022))  # 91.04
+        test3 = s2.npv(bond_yield=test, eval_date=ql.Date(1, 4, 2022))
 
-        print("%-15s = %lf" % ("Expected Price", 91.04))
-        print("%-15s = %lf" % ("Expected Yield", 2.0))
-        print("%-15s = %lf" % ("Bond Yield", round(test * 100, 2)))
-        print("%-15s = %lf" % ("Clean Price", test2))
-        print("%-15s = %lf" % ("NPV", test3))
+        print("%-15s = %1.3f" % ("Expected Yield", 2.0))
+        print("%-15s = %1.3f" % ("Bond Yield", round(test * 100, 2)))
+        print("%-15s = %1.3f" % ("Expected Price", 91.04))
+        print("%-15s = %1.3f" % ("Clean Price", test2))
+        print("%-15s = %1.3f" % ("Dirty Price", test4))
+        print("%-15s = %1.3f" % ("NPV", test3))
+        print("")
+
+        p = 88.01
+        y = 0.0203
+        coupon, maturity, issue = (0.60, ql.Date(1, 8, 2031), ql.Date(23, 2, 2021))
+        s2 = BTP(issue, maturity, coupon)
+        ttest = s2.bond_yield(price=p, eval_date=ql.Date(1, 4, 2022))  # 2.0
+        ttest2 = s2.clean_price(bond_yield=ttest, eval_date=ql.Date(1, 4, 2022))  # 91.04
+        ttest4 = s2.dirty_price(bond_yield=ttest, eval_date=ql.Date(1, 4, 2022))  # 91.04
+        ttest3 = s2.npv(bond_yield=ttest, eval_date=ql.Date(1, 4, 2022))
+
+        print("%-15s = %1.3f" % ("Expected Yield", y * 100))
+        print("%-15s = %1.3f" % ("Bond Yield", round(ttest * 100, 2)))
+        print("%-15s = %1.3f" % ("Expected Price", p))
+        print("%-15s = %1.3f" % ("Clean Price", ttest2))
+        print("%-15s = %1.3f" % ("Dirty Price", ttest4))
+        print("%-15s = %1.3f" % ("NPV", ttest3))
         print("")
 
     if TEST == 'CTD':
