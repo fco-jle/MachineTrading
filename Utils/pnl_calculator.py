@@ -36,6 +36,16 @@ class PnLCalculator:
         return self.market_value - self.cost
 
 
+def compute_pnl(quantities, exec_prices, contract_notional=100000, tick_value=10):
+    pos = PnLCalculator(contract_notional=contract_notional, tick_value=tick_value)
+    pnls = []
+    for (p, e) in zip(quantities, exec_prices):
+        pos.fill(p, e)
+        u_pnl = pos.update(e)
+        pnls.append(u_pnl + pos.r_pnl)
+    return pnls
+
+
 if __name__ == '__main__':
     from prettytable import PrettyTable
 

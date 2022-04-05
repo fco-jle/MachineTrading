@@ -28,6 +28,7 @@ class FixedRateBond:
         schedule = ql.Schedule(self.issue_date, self.maturity_date, tenor, self.calendar,
                                convention, maturity_date_convention, rule, end_of_month)
         self.accrualDayCounter = ql.ActualActual(ql.ActualActual.Bond, schedule)
+        self.pricingDayCounter = ql.ActualActual(ql.ActualActual.Bond)
         self.bond = ql.FixedRateBond(self.settlementDays, face_amount,
                                      schedule, coupons, self.accrualDayCounter,
                                      payment_convention)
@@ -67,27 +68,43 @@ class FixedRateBond:
     def bond_yield(self, price, eval_date=None):
         if eval_date:
             self.set_evaluation_date(eval_date)
-        yld = self.bond.bondYield(price, self.accrualDayCounter, self.compounding, ql.Annual)
+        yld = self.bond.bondYield(price, self.pricingDayCounter, self.compounding, ql.Annual)
         return yld
 
-    def clean_price(self, bond_yield, eval_date=None):
+    def clean_price(self, bond_yield, eval_date=None, errors='raise'):
         if eval_date:
             self.set_evaluation_date(eval_date)
-        prc = self.bond.cleanPrice(bond_yield, self.accrualDayCounter, self.compounding, ql.Annual)
+        try:
+            prc = self.bond.cleanPrice(bond_yield, self.pricingDayCounter, self.compounding, ql.Annual)
+        except RuntimeError:
+            if errors == 'coerce':
+                prc = np.nan
+            elif errors == 'raise':
+                raise RuntimeError
+            else:
+                raise ValueError("Invalid errors value")
         return prc
 
     def dirty_price(self, bond_yield, eval_date=None):
         if eval_date:
             self.set_evaluation_date(eval_date)
-        prc = self.bond.dirtyPrice(bond_yield, self.accrualDayCounter, self.compounding, ql.Annual)
+        prc = self.bond.dirtyPrice(bond_yield, self.pricingDayCounter, self.compounding, ql.Annual)
         return prc
 
     def npv(self, bond_yield, eval_date=None):
         if eval_date:
             self.set_evaluation_date(eval_date)
-        self._set_pricing_engine(bond_yield, day_counter=self.accrualDayCounter, compounding_period=ql.Annual)
+        self._set_pricing_engine(bond_yield, day_counter=self.pricingDayCounter, compounding_period=ql.Annual)
         npv = self.bond.NPV()
         return npv
+
+    def dv01(self, bond_yield, bond_price, eval_date=None):
+        if eval_date:
+            self.set_evaluation_date(eval_date)
+        dur = self.duration_modified(bond_yield=bond_yield)
+        delta_i = 0.01
+        dollar_duration = dur * (delta_i / (1+bond_yield)) * bond_price
+        return dollar_duration
 
     def dv01_from_yield(self, bond_yield, eval_date=None):
         p1 = self.clean_price(bond_yield=bond_yield, eval_date=eval_date)
@@ -157,12 +174,12 @@ class FixedRateBond:
 
 
 class BTP(FixedRateBond):
-    def __init__(self, issue_date, maturity_date, coupon, settlement_days=2):
+    def __init__(self, issue_date, maturity_date, coupon):
         super(BTP, self).__init__(
             issue_date=issue_date,
             maturity_date=maturity_date,
             coupon=coupon,
-            settlement_days=settlement_days,
+            settlement_days=2,
             calendar=ql.NullCalendar(),
             payment_convention=ql.ModifiedFollowing,
             end_of_month=True
@@ -181,17 +198,11 @@ class FixedRateBondEurex(FixedRateBond):
             end_of_month=False
         )
 
-    def clean_price(self, bond_yield, eval_date=None):
-        if eval_date:
-            self.set_evaluation_date(eval_date)
-        prc = self.bond.cleanPrice(bond_yield, self.accrualDayCounter, ql.Compounded, ql.Annual)
-        return prc
-
 
 if __name__ == '__main__':
     TEST = 'ComputePrice'
     # TEST = 'ForwardYield'
-    # TEST = 'CTD'
+    TEST = 'CTD'
 
     if TEST == 'ForwardYield':
         """
@@ -278,8 +289,7 @@ if __name__ == '__main__':
         for i, b in enumerate(basket):
             coupon, maturity, issue, price = b
             s = FixedRateBondEurex(issue, maturity, coupon)
-            cf, basis = s.futures_contract_conversion_factor(bond_price=price, futures_price=f_price,
-                                                             futures_delivery_date=f_delivery)
+            cf, basis = s.futures_contract_conversion_factor(price, f_price, f_delivery)
             if basis < min_basis:
                 min_basis = basis
                 min_basis_index = i
