@@ -124,7 +124,7 @@ class FixedRateBond:
         return ql.BondFunctions.duration(
             self.bond,
             bond_yield,
-            self.accrualDayCounter,
+            self.pricingDayCounter,
             self.compounding,
             self.frequency,
             kind)
@@ -145,7 +145,7 @@ class FixedRateBond:
         return ql.BondFunctions.convexity(
             self.bond,
             bond_yield,
-            self.accrualDayCounter,
+            self.pricingDayCounter,
             self.compounding,
             self.frequency)
 
