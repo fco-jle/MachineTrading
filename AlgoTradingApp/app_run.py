@@ -201,9 +201,18 @@ class Window(QMainWindow):
         # Configure Object Time Series Plots
         self.time_series_plots = pg.GraphicsLayoutWidget()
         self.maturity_plot = pg.GraphicsLayoutWidget()
+        self.correlation_plot = pg.GraphicsLayoutWidget()
+
         self.splitter.addWidget(self.time_series_plots)
+        self.splitter.addWidget(self.correlation_plot)
         self.splitter.addWidget(self.maturity_plot)
-        self.splitter.setSizes([int(self.width() * 0.6), int(self.width() * 0.4)])
+        self.splitter.setSizes([int(self.width() * 0.5), int(self.width() * 0.25), int(self.width() * 0.25)])
+
+        # Config Correlation Plot
+        self.yield_corr_plot = self.correlation_plot.addPlot(row=0, col=0)
+        self.price_corr_plot = self.correlation_plot.addPlot(row=1, col=0)
+        self.yield_corr_plot.setTitle("<font size='5'> Yield Correlation Matrix </font>")
+        self.price_corr_plot.setTitle("<font size='5'> Price Correlation Matrix </font>")
 
         # Config Left Part of Splitter
         self.yield_plot = self.time_series_plots.addPlot(row=0, col=0, axisItems={'bottom': pg.DateAxisItem()})
@@ -212,7 +221,7 @@ class Window(QMainWindow):
         self.yield_plot.showGrid(x=False, y=True)
         self.price_plot.showGrid(x=False, y=True)
         self.yield_plot.setTitle("<font size='5'> Selected Instruments Yield</font>")
-        self.yield_plot.setLabels(left="<font size='4'>Yield</font>", bottom="<font size='4'>Datetime</font>")
+        self.yield_plot.setLabels(left="<font size='4'>Yield (%)</font>", bottom="<font size='4'>Datetime</font>")
         self.price_plot.setTitle("<font size='5'> Selected Instruments Price</font>")
         self.price_plot.setLabels(left="<font size='4'>Price</font>", bottom="<font size='4'>Datetime</font>")
 
@@ -226,7 +235,7 @@ class Window(QMainWindow):
         self.volatility_plot.showGrid(x=False, y=True)
         self.pca_plot.showGrid(x=False, y=True)
         self.yield_curve_plot.setTitle("<font size='5'> Yield Curve </font>")
-        self.yield_curve_plot.setLabels(left="<font size='4'>Yield</font>", bottom="<font size='4'>Maturity</font>")
+        self.yield_curve_plot.setLabels(left="<font size='4'>Yield (%)</font>", bottom="<font size='4'>Maturity</font>")
         self.volatility_plot.setTitle("<font size='5'> Volatility </font>")
         self.volatility_plot.setLabels(left="<font size='4'>Volatility</font>", bottom="<font size='4'>Maturity</font>")
         self.pca_plot.setTitle("<font size='5'> PCA </font>")
@@ -350,7 +359,7 @@ class Window(QMainWindow):
             prc_data = app_bond.get_current_price_data()
 
             x = yld_data['Date'].values.astype(np.int64) // 10 ** 9
-            y = yld_data['Close'].values
+            y = yld_data['Close'].values * 100
 
             x2 = prc_data['Date'].values.astype(np.int64) // 10 ** 9
             y2 = prc_data['Close'].values
@@ -401,7 +410,7 @@ class Window(QMainWindow):
 
         volatility_x = np.array(volatility_x)
         volatility_y = np.array(volatility_y)
-        yields_y = np.array(yields_y)
+        yields_y = np.array(yields_y) * 100
 
         # Sort Arrays:
         sorted_idx = np.argsort(volatility_x)
@@ -530,6 +539,64 @@ class Window(QMainWindow):
         self.duration_plot.addItem(bargraph2)
         self.convexity_plot.addItem(bargraph3)
 
+    def update_correlation_plots(self):
+        self.yield_corr_plot.clear()
+
+        if len(self.instruments) < 2:
+            return
+
+        corr_price = []
+        corr_yield = []
+        maturities = []
+        isins = []
+        for i, isin in enumerate(self.instruments.keys()):
+            app_bond = self.instruments[isin]
+            assert isinstance(app_bond, AppBond)
+            try:
+                isin_params = self.params.param('Instruments').param(isin)
+            except KeyError:
+                continue
+            if not isin_params['Plot']:
+                continue
+
+            prc_data = app_bond.get_current_price_data()
+            yld_data = app_bond.get_current_yield_data()
+
+            corr_price.append(prc_data.set_index('Date')[['Close']].rename(columns={'Close': isin}))
+            corr_yield.append(yld_data.set_index('Date')[['Close']].rename(columns={'Close': isin}))
+
+            maturities.append(app_bond.bond.maturity_date)
+            isins.append(app_bond.instrument_id)
+
+        sorted_indexes = np.argsort(maturities)
+        sorted_isins = [isins[x] for x in sorted_indexes]
+
+        corr_price = pd.concat(corr_price, axis=1)[sorted_isins]
+        corr_yield = pd.concat(corr_yield, axis=1)[sorted_isins]
+
+        corr_price = corr_price.corr()
+        corr_yield = corr_yield.corr()
+
+        self.plot_correlogram(self.yield_corr_plot, corr_yield)
+        self.plot_correlogram(self.price_corr_plot, corr_price)
+
+    def plot_correlogram(self, parent, data):
+        correlogram = pg.ImageItem()
+        tr = QtGui.QTransform().translate(-0.5, -0.5)
+        correlogram.setTransform(tr)
+        correlogram.setImage(data.values)
+        parent.invertY(True)  # orient y axis to run top-to-bottom
+        parent.setDefaultPadding(0.0)  # plot without padding data range
+        parent.addItem(correlogram)  # display correlogram
+        parent.showAxes(True, showValues=(True, True, False, False), size=20)
+        ticks = [(idx, str(idx)) for idx, label in enumerate(data.columns)]
+        for side in ('left', 'top', 'right', 'bottom'):
+            parent.getAxis(side).setTicks((ticks, []))  # add list of major ticks; no minor ticks
+        parent.getAxis('bottom').setHeight(10)  # include some additional space at bottom of figure
+        colorMap = pg.colormap.get("inferno", source='matplotlib')  # choose perceptually uniform, diverging color map
+        bar = pg.ColorBarItem(values=(-1, 1), colorMap=colorMap)
+        bar.setImageItem(correlogram, insert_in=parent)
+
     def apply_hedge(self):
         if self.notionals_have_changed():
             hedge = np.sum(list(self.latest_notionals.values()))
@@ -557,12 +624,12 @@ class Window(QMainWindow):
         self.update_price_plot()
         self.update_maturity_plot()
         self.update_hedge_plot()
+        self.update_correlation_plots()
 
 
 if __name__ == "__main__":
     from pyqtgraph.examples.relativity import relativity
 
-    # from pyqtgraph.examples import parametertree
     test = False
     if test:
         import pyqtgraph.examples
