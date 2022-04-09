@@ -18,6 +18,7 @@ from pyqtgraph.parametertree import types as ptypes
 import pyqtgraph as pg
 from pyqtgraph import configfile
 from pyqtgraph.flowchart import Flowchart
+import pyqtgraph.opengl as gl
 
 from MachineTrading.Utils import io_utils
 from MachineTrading.Instruments.fixed_rate import BTP
@@ -214,21 +215,75 @@ class Window(QMainWindow):
         self.yield_series = None
         self.price_series = None
 
+    def update_yield_surface_plot(self):
+        self.yield_surface_plot.clear()
+        if len(self.maturities) < 4:
+            return
+
+        w = self.yield_surface_plot
+        w.setCameraPosition(distance=2)
+
+        g = gl.GLGridItem()
+        g.scale(0.5, 0.5, 1)
+        g.setDepthValue(10)  # draw grid after surfaces since they may be translucent
+        w.addItem(g)
+
+        selected_date = self.get_selected_date()
+
+        try:
+            selected_date_idx = np.where(self.yield_series.index.date==selected_date)[0][0]
+        except IndexError:
+            selected_date_idx = len(self.yield_series)-1
+
+        y = self.yield_series.index.values.astype(np.int64) // 10 ** 9
+        y = (y-np.min(y)) / (np.max(y)-np.min(y))
+
+        x = self.maturities
+        x = (x - np.min(x)) / (np.max(x) - np.min(x))
+
+        z = self.yield_series.values / np.max(self.yield_series.values)
+        n = len(y)
+
+        for i in range(n):
+            yi = y[i]
+            zi = z[i]
+            pts = np.column_stack([x, np.ones(len(x))*yi, zi])
+            color = pg.mkColor('r') if i == selected_date_idx else pg.mkColor(0.5)
+            width = 5 if i==selected_date_idx else 1
+            plt = gl.GLLinePlotItem(pos=pts, color=color, width=width, antialias=True)
+            w.addItem(plt)
+
+
+        # shader = "normalColor"
+        # shader = 'heightColor'
+        # # shader = 'shaded'
+        # p2 = gl.GLSurfacePlotItem(x=x, y=y, z=z, smooth=True, shader=shader, glOptions='opaque')
+        # w.addItem(p2)
+
     # ------------------------ SETUP -----------------------------
     def setup_gui(self):
         self.splitter = QtWidgets.QSplitter()
         self.splitter.setOrientation(QtCore.Qt.Orientation.Horizontal)
         self.ui.plotsLayout.addWidget(self.splitter)
 
+        self.splitter_vertical = QtWidgets.QSplitter()
+        self.splitter_vertical.setOrientation(QtCore.Qt.Orientation.Vertical)
+
         # Configure Object Time Series Plots
         self.time_series_plots = pg.GraphicsLayoutWidget()
         self.maturity_plot = pg.GraphicsLayoutWidget()
         self.correlation_plot = pg.GraphicsLayoutWidget()
+        self.yield_surface_plot = gl.GLViewWidget()
 
         self.splitter.addWidget(self.time_series_plots)
-        self.splitter.addWidget(self.correlation_plot)
+        self.splitter.addWidget(self.splitter_vertical)
         self.splitter.addWidget(self.maturity_plot)
-        self.splitter.setSizes([int(self.width() * 0.5), int(self.width() * 0.25), int(self.width() * 0.25)])
+
+        self.splitter_vertical.addWidget(self.yield_surface_plot)
+        self.splitter_vertical.addWidget(self.correlation_plot)
+
+        self.splitter.setSizes([int(self.width() * 0.50), int(self.width() * 0.25), int(self.width() * 0.25)])
+        self.splitter_vertical.setSizes([int(self.height() * 0.33), int(self.height() * 0.667)])
 
         # Config Correlation Plot
         self.yield_corr_plot = self.correlation_plot.addPlot(row=0, col=0)
@@ -742,6 +797,7 @@ class Window(QMainWindow):
         self.update_price_plot()
         self.update_maturity_plot()
         self.update_correlation_plots()
+        self.update_yield_surface_plot()
 
         # Tab 2 Update:
         self.update_hedge_plot()
@@ -749,6 +805,8 @@ class Window(QMainWindow):
 
 if __name__ == "__main__":
     from pyqtgraph.examples.relativity import relativity
+
+    AppLogger.verbosity = 0
 
     test = False
     if test:
