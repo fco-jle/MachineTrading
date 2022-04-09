@@ -22,6 +22,7 @@ from pyqtgraph.flowchart import Flowchart
 from MachineTrading.Utils import io_utils
 from MachineTrading.Instruments.fixed_rate import BTP
 from MachineTrading.AlgoTradingApp.appmain import Ui_MainWindow
+from MachineTrading.TSA.volatility import garman_klass, standard_dev, close_to_close, parkinson, garman_klass_yang_zhang
 
 
 def random_color():
@@ -51,6 +52,7 @@ class AppBond:
         self.yld = None
         self.convexity = None
         self.duration = None
+        self.current_data_date = None
 
     def compute_price_data(self):
         temp = self._yield_data.copy()
@@ -83,11 +85,15 @@ class AppBond:
         selt._price_data = self._price_data_backup.copy()
 
     def update_data(self, date):
+        if date == self.current_data_date:
+            AppLogger.print(f"Calling - update_data for isin {self.instrument_id} - Data is up to date - Skipping")
+            return
+
+        AppLogger.print(f"Calling - update_data for isin {self.instrument_id}")
         max_date_available = self.get_current_price_data()['Date'].iloc[-1].date()
         if date > max_date_available:
             print(f"Selected date not available, defaulting to max date in data: {max_date_available}")
             date = max_date_available
-
         self.bond.set_evaluation_date(date)
         self.price = self.get_current_price_data().set_index('Date').loc[str(date)]['Close']
         self.yld = self.get_current_yield_data().set_index('Date').loc[str(date)]['Close']
@@ -95,6 +101,23 @@ class AppBond:
         self.duration = self.bond.duration_modified(bond_yield=self.yld)
         self.dv01 = self.bond.dv01(bond_yield=self.yld, bond_price=self.price, eval_date=date)
         self.years_to_maturity = self.bond.years_to_maturity(eval_date=date)
+        self.current_data_date = date
+
+    def compute_volatility(self, vola_type):
+        if vola_type == 'Garman Klass':
+            vola = garman_klass(self.get_current_price_data())
+        elif vola_type == 'Standard Dev':
+            vola = standard_dev(self.get_current_price_data())
+        elif vola_type == 'Close To Close':
+            vola = close_to_close(self.get_current_price_data())
+        elif vola_type == 'Parkinson':
+            vola = parkinson(self.get_current_price_data())
+        elif vola_type == "Garman Klass Yang Zhang":
+            vola = garman_klass_yang_zhang(self.get_current_price_data())
+        else:
+            print("WTF")
+            vola = 0.0
+        return vola
 
 
 class InstrumentParam(ptypes.GroupParameter):
@@ -103,7 +126,7 @@ class InstrumentParam(ptypes.GroupParameter):
         auto_ic = True if name == 'Instrument' else False
         defs = dict(
             name=name, autoIncrementName=auto_ic, renamable=True, removable=True, expanded=False, children=[
-                dict(name='Plot', type='bool', value=True),
+                dict(name='Enabled', type='bool', value=True),
                 dict(name='Notional', type='float', value=0.0, step=100, limits=[-1e12, 1e12]),
                 dict(name='HedgeInstrument', type='bool', value=False),
                 dict(name='Style', type='list', limits=['Solid', 'Dashed', 'Dotted'], value='Solid'),
@@ -145,6 +168,15 @@ class InstrumentsGroupParam(ptypes.GroupParameter):
 ptypes.registerParameterType('Instrument', InstrumentParam)
 
 
+class AppLogger:
+    verbosity = 1
+
+    @classmethod
+    def print(cls, text):
+        if cls.verbosity >= 1:
+            print(text)
+
+
 class Window(QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -167,45 +199,22 @@ class Window(QMainWindow):
         self.tree = ParameterTree(showHeader=False)
 
         # Other components:
+        self.is_enabled = []
         self.pca_data = {}
+        self.maturities = np.zeros(1)
+        self.isins = np.zeros(1)
+        self.is_hedge = np.zeros(1)
+        self.prices = np.zeros(1)
+        self.yields = np.zeros(1)
+        self.volatilities = np.zeros(1)
+        self.notionals = np.zeros(1)
+        self.dv01s = np.zeros(1)
+        self.durations = np.zeros(1)
+        self.convexities = np.zeros(1)
+        self.yield_series = None
+        self.price_series = None
 
-    def setup_gui_2(self):
-        self.hedgeSplitter = QtWidgets.QSplitter()
-        self.hedgeSplitter.setOrientation(QtCore.Qt.Orientation.Horizontal)
-        self.ui.hedgeLayout.addWidget(self.hedgeSplitter)
-
-        # Configure Object Time Series Plots
-        self.hedgeInfoData = pg.LayoutWidget()
-        self.hedgeSplitter.addWidget(self.hedgeInfoData)
-
-        self.hedge_data_table = pg.TableWidget()
-        self.hedge_data_table.show()
-        self.hedge_data_table.resize(500, 500)
-        self.hedge_data_table.setWindowTitle('pyqtgraph example: TableWidget')
-        self.hedgeInfoData.addWidget(self.hedge_data_table)
-
-        self.hedgeInfoPlots = pg.GraphicsLayoutWidget()
-        self.hedgeSplitter.addWidget(self.hedgeInfoPlots)
-
-        self.hedgeSplitter.setSizes([int(self.width() * 0.25), int(self.width() * 0.75)])
-
-        self.dv01_plot = self.hedgeInfoPlots.addPlot(row=0, col=0)
-        self.duration_plot = self.hedgeInfoPlots.addPlot(row=1, col=0)
-        self.convexity_plot = self.hedgeInfoPlots.addPlot(row=2, col=0)
-        self.duration_plot.setXLink(self.dv01_plot)
-        self.convexity_plot.setXLink(self.dv01_plot)
-
-        self.dv01_plot.setTitle("<font size='5'> DV01 </font>")
-        self.dv01_plot.setLabels(left="<font size='4'>DV01</font>", bottom="<font size='4'>Maturity</font>")
-        self.duration_plot.setTitle("<font size='5'> Duration </font>")
-        self.duration_plot.setLabels(left="<font size='4'>Duration</font>", bottom="<font size='4'>Maturity</font>")
-        self.convexity_plot.setTitle("<font size='5'> Convexity </font>")
-        self.convexity_plot.setLabels(left="<font size='4'>Convexity</font>", bottom="<font size='4'>Maturity</font>")
-
-        self.dv01_plot.showGrid(x=False, y=True)
-        self.duration_plot.showGrid(x=False, y=True)
-        self.convexity_plot.showGrid(x=False, y=True)
-
+    # ------------------------ SETUP -----------------------------
     def setup_gui(self):
         self.splitter = QtWidgets.QSplitter()
         self.splitter.setOrientation(QtCore.Qt.Orientation.Horizontal)
@@ -254,6 +263,43 @@ class Window(QMainWindow):
         self.pca_plot.setTitle("<font size='5'> PCA </font>")
         self.pca_plot.setLabels(left="<font size='4'>PCA</font>", bottom="<font size='4'>Maturity</font>")
 
+    def setup_gui_2(self):
+        self.hedgeSplitter = QtWidgets.QSplitter()
+        self.hedgeSplitter.setOrientation(QtCore.Qt.Orientation.Horizontal)
+        self.ui.hedgeLayout.addWidget(self.hedgeSplitter)
+
+        # Configure Object Time Series Plots
+        self.hedgeInfoData = pg.LayoutWidget()
+        self.hedgeSplitter.addWidget(self.hedgeInfoData)
+
+        self.hedge_data_table = pg.TableWidget()
+        self.hedge_data_table.show()
+        self.hedge_data_table.resize(500, 500)
+        self.hedge_data_table.setWindowTitle('pyqtgraph example: TableWidget')
+        self.hedgeInfoData.addWidget(self.hedge_data_table)
+
+        self.hedgeInfoPlots = pg.GraphicsLayoutWidget()
+        self.hedgeSplitter.addWidget(self.hedgeInfoPlots)
+
+        self.hedgeSplitter.setSizes([int(self.width() * 0.25), int(self.width() * 0.75)])
+
+        self.dv01_plot = self.hedgeInfoPlots.addPlot(row=0, col=0)
+        self.duration_plot = self.hedgeInfoPlots.addPlot(row=1, col=0)
+        self.convexity_plot = self.hedgeInfoPlots.addPlot(row=2, col=0)
+        self.duration_plot.setXLink(self.dv01_plot)
+        self.convexity_plot.setXLink(self.dv01_plot)
+
+        self.dv01_plot.setTitle("<font size='5'> DV01 </font>")
+        self.dv01_plot.setLabels(left="<font size='4'>DV01</font>", bottom="<font size='4'>Maturity</font>")
+        self.duration_plot.setTitle("<font size='5'> Duration </font>")
+        self.duration_plot.setLabels(left="<font size='4'>Duration</font>", bottom="<font size='4'>Maturity</font>")
+        self.convexity_plot.setTitle("<font size='5'> Convexity </font>")
+        self.convexity_plot.setLabels(left="<font size='4'>Convexity</font>", bottom="<font size='4'>Maturity</font>")
+
+        self.dv01_plot.showGrid(x=False, y=True)
+        self.duration_plot.showGrid(x=False, y=True)
+        self.convexity_plot.showGrid(x=False, y=True)
+
     def setup_config(self):
         self.tree = ParameterTree(showHeader=False)
         self.params = Parameter.create(name='params', type='group', children=[
@@ -264,7 +310,8 @@ class Window(QMainWindow):
                 dict(name='Candles Window', type='str', value="D"),
                 dict(name='EMA Window', type='int', value=0, step=1, limits=[0, None]),
                 dict(name='Volatility Type', type='list',
-                     limits=["Garman Klass", "Standard Dev"], value="Garman Klass"),
+                     limits=["Standard Dev", "Close To Close", "Parkinson", "Garman Klass", "Garman Klass Yang Zhang"],
+                     value="Garman Klass"),
                 dict(name='PCA Components', type='int', value=3),
                 dict(name='Yield Curve Date', type='calendar', value=None, expanded=False),
             ]),
@@ -279,12 +326,15 @@ class Window(QMainWindow):
         self.params.param('Save').sigActivated.connect(self.save)
         self.params.param('Load').sigActivated.connect(self.load)
         self.params.param('Load Preset').sigValueChanged.connect(self.load_preset)
+
         self.params.param('Instruments').sigChildAdded.connect(self.instrument_add)
         self.params.param('Instruments').sigChildRemoved.connect(self.instrument_delete)
+
         self.params.param('Data Params').param('Candles Window').sigValueChanged.connect(self.update_candles)
         self.params.param('Data Params').param('EMA Window').sigValueChanged.connect(self.update_candles)
         self.params.param('Data Params').param('Yield Curve Date').sigValueChanged.connect(self.params_change_manager)
-        self.params.sigTreeStateChanged.connect(self.params_change_manager)
+        self.params.param('Data Params').param('PCA Components').sigValueChanged.connect(self.update_pca_computation)
+        self.params.param('Data Params').param('Volatility Type').sigValueChanged.connect(self.update_volatility)
 
         preset_dir = os.path.join(os.path.abspath(os.path.dirname(sys.argv[0])), 'presets')
         if os.path.exists(preset_dir):
@@ -292,23 +342,25 @@ class Window(QMainWindow):
             self.params.param('Load Preset').setLimits([''] + presets)
         self.ui.instrumentsLayout.addWidget(self.tree)
 
+    # ----------------- ADDING / DELETING INSTRUMENTS -------------
     def instrument_add(self, child, idx):
-        new_instrument_isin = idx.name().split(' ')[0]
-        bond = AppBond(new_instrument_isin)
-        self.instruments[new_instrument_isin] = bond
+        AppLogger.print(f"Adding Instrument {idx.name()}")
+        id = idx.name().split(' ')[0]  # Isin
+        self.instruments[id] = AppBond(id)  # Bond Object
 
-        self.params.param('Instruments').param(
-            new_instrument_isin).param('Notional').sigValueChanged.connect(self.apply_hedge)
+        # Link Instrument Parameters to hedging function:
+        for param in ['Notional', 'HedgeInstrument']:
+            self.params.param('Instruments').param(id).param(param).sigValueChanged.connect(self.apply_hedge)
 
-        self.params.param('Instruments').param(
-            new_instrument_isin).param('HedgeInstrument').sigValueChanged.connect(self.apply_hedge)
-
+        # If a new instrument is added, everything needs to be updated:
         self.params_change_manager()
 
     def instrument_delete(self, child: InstrumentsGroupParam):
         to_delete = list(set(self.instruments.keys()) - set(child.current_instrument_names()))
         if len(to_delete) > 0:
             del self.instruments[to_delete[0]]
+        # If an instrument is deleted, we need to update everything
+        self.params_change_manager()
 
     def save(self):
         filename = pg.QtWidgets.QFileDialog.getSaveFileName(self, "Save State..", "untitled.cfg",
@@ -344,6 +396,37 @@ class Window(QMainWindow):
         self.params.param('Instruments').clearChildren()
         self.params.restoreState(state, removeChildren=False)
 
+    # --------------------- UTILITIES ----------------------------
+    def get_selected_date(self):
+        date_param = self.params.param('Data Params').param("Yield Curve Date").value()
+        date = dt.date(date_param.year(), date_param.month(), date_param.day())
+        return date
+
+    def update_candles(self):
+        AppLogger.print(f"Calling - update_candles")
+        for instrument_id, bond in self.instruments.items():
+            assert isinstance(bond, AppBond)
+            data = [bond.get_original_yield_data().copy(), bond.get_original_price_data().copy()]
+            new_data = []
+            for df in data:
+                candles_w = self.params.param('Data Params').param("Candles Window").value()
+                ema_w = self.params.param('Data Params').param("EMA Window").value()
+
+                df = df.set_index('Date').resample(rule=candles_w).last()
+                df = df.dropna(thresh=4)
+                df = df.reset_index()
+
+                if ema_w >= 1:
+                    df = df.set_index('Date').ewm(span=ema_w).mean().reset_index()
+                new_data.append(df)
+
+            bond.set_current_yield_data(new_data[0])
+            bond.set_current_price_data(new_data[1])
+
+        # Once candles have been updated, i need to update all data and plots:
+        self.params_change_manager()
+
+    # -------------------------- PLOTS ---------------------------
     def update_price_plot(self):
         if not self.yield_plot:
             return
@@ -357,7 +440,7 @@ class Window(QMainWindow):
                 continue
 
             # Check if should be plotted:
-            if not isin_params['Plot']:
+            if not isin_params['Enabled']:
                 continue
 
             # Pen Creation
@@ -380,132 +463,46 @@ class Window(QMainWindow):
             self.yield_plot.plot(x, y, pen=pen)
             self.price_plot.plot(x2, y2, pen=pen)
 
-    def get_selected_date(self):
-        date_param = self.params.param('Data Params').param("Yield Curve Date").value()
-        date = dt.date(date_param.year(), date_param.month(), date_param.day())
-        return date
+    def update_volatility(self):
+        volatilities = {}
+        vola_type = self.params.param('Data Params').param('Volatility Type').value()
+        for i, isin in enumerate(self.instruments.keys()):
+            app_bond = self.instruments[isin]
+            volatilities[isin] = app_bond.compute_volatility(vola_type)
+        self.volatilities = np.array([volatilities[isin] for isin in self.isins])
+        self.update_maturity_plot()
 
     def update_maturity_plot(self):
         self.yield_curve_plot.clear()
+        self.yield_curve_plot.plot(self.maturities, self.yields * 100, symbol='o', pen=pg.mkPen(color=(206, 241, 229)))
+
         self.volatility_plot.clear()
+        self.volatility_plot.plot(self.maturities, self.volatilities, symbol='o', pen=pg.mkPen(color=(206, 241, 229)))
+
+        self.update_pca_plot()
+
+    def update_pca_plot(self):
         self.pca_plot.clear()
-
-        # Pen Creation
-        pen = pg.mkPen(color=(206, 241, 229))
-
-        volatility_x = []
-        volatility_y = []
-        yields_y = []
-
-        for i, isin in enumerate(self.instruments.keys()):
-            app_bond = self.instruments[isin]
-            assert isinstance(app_bond, AppBond)
-            try:
-                isin_params = self.params.param('Instruments').param(isin)
-            except KeyError:
-                continue
-            if not isin_params['Plot']:
-                continue
-
-            prc_data = app_bond.get_current_price_data()
-            yld_data = app_bond.get_current_yield_data()
-
-            try:
-                date = self.get_selected_date()
-                current_yld = yld_data.set_index('Date').loc[str(date)]['Close']
-            except KeyError:
-                current_yld = yld_data.set_index('Date').iloc[-1]['Close']
-
-            yields_y.append(current_yld)
-            ytm = app_bond.bond.years_to_maturity()
-            vola = prc_data['Close'].std()
-            volatility_x.append(ytm)
-            volatility_y.append(vola)
-
-        volatility_x = np.array(volatility_x)
-        volatility_y = np.array(volatility_y)
-        yields_y = np.array(yields_y) * 100
-
-        # Sort Arrays:
-        sorted_idx = np.argsort(volatility_x)
-        self.yield_curve_plot.plot(volatility_x[sorted_idx], yields_y[sorted_idx], symbol='o', pen=pen)
-        self.volatility_plot.plot(volatility_x[sorted_idx], volatility_y[sorted_idx], symbol='o', pen=pen)
-
         if 'Components' in self.pca_data.keys():
             n_comps = self.pca_data['Components'].shape[0]
             pens = [pg.mkPen(color=random_color()) for _ in range(n_comps)]
             for i in range(n_comps):
                 self.pca_plot.plot(self.pca_data['X'], self.pca_data['Components'][i], pen=pens[i])
 
-    def update_candles(self):
-        for instrument_id, bond in self.instruments.items():
-            assert isinstance(bond, AppBond)
-            data = [bond.get_original_yield_data().copy(), bond.get_original_price_data().copy()]
-            new_data = []
-            for df in data:
-                candles_w = self.params.param('Data Params').param("Candles Window").value()
-                ema_w = self.params.param('Data Params').param("EMA Window").value()
-
-                df = df.set_index('Date').resample(rule=candles_w).last()
-                df = df.dropna(thresh=4)
-                df = df.reset_index()
-
-                # If EMA Window exists, transform:
-                if ema_w >= 1:
-                    df = df.set_index('Date').ewm(span=ema_w).mean().reset_index()
-                new_data.append(df)
-
-            bond.set_current_yield_data(new_data[0])
-            bond.set_current_price_data(new_data[1])
-
-        self.params_change_manager()
-
     def update_pca_computation(self):
-        pca_df = []
-        maturities = []
-        isins = []
-        for i, isin in enumerate(self.instruments.keys()):
-            app_bond = self.instruments[isin]
-            assert isinstance(app_bond, AppBond)
-            try:
-                isin_params = self.params.param('Instruments').param(isin)
-            except KeyError:
-                continue
-            if not isin_params['Plot']:
-                continue
-
-            ytm = app_bond.bond.years_to_maturity()
-            yld_data = app_bond.get_current_yield_data()
-            close_yld = yld_data.set_index('Date')[['Close']]
-            close_yld.columns = [app_bond.instrument_id]
-            pca_df.append(close_yld)
-            maturities.append(ytm)
-            isins.append(app_bond.instrument_id)
-
-        try:
-            pca_df = pd.concat(pca_df, axis=1)
-        except ValueError:
-            self.pca_data = {}
-            return
-
-        sorted_indexes = np.argsort(maturities)
-        sorted_instruments = [isins[x] for x in sorted_indexes]
-        sorted_maturities = np.array([maturities[x] for x in sorted_indexes])
-        sorted_df = pca_df[sorted_instruments].copy()
-        sorted_df = sorted_df.fillna(method='ffill')
-
+        sorted_df = self.yield_series
         n_comps = self.params.param('Data Params').param('PCA Components').value()
         pca = PCA(n_components=n_comps)
         try:
             pca.fit(sorted_df)
-            self.pca_data = {'X': sorted_maturities,
+            self.pca_data = {'X': self.maturities,
                              'Components': pca.components_}
         except ValueError:
             self.pca_data = {}
+        self.update_pca_plot()
 
-    def update_hedge_plot(self):
-        self.apply_hedge()
-
+    def update_all_instrument_properties(self):
+        AppLogger.print("Calling - update_all_instrument_properties")
         maturities = []
         dv01s = []
         durations = []
@@ -513,9 +510,15 @@ class Window(QMainWindow):
         isins = []
         notionals = []
         prices = []
+        yields = []
         is_hedge = []
-        multiply_by_notionals = self.params.param("Hedge Options").param('Notional Multiply').value()
-
+        is_enabled = []
+        yld_series = []
+        price_series = []
+        volatilities = []
+        corr_price = []
+        corr_yield = []
+        vola_type = self.params.param('Data Params').param('Volatility Type').value()
         for i, isin in enumerate(self.instruments.keys()):
             app_bond = self.instruments[isin]
             assert isinstance(app_bond, AppBond)
@@ -523,12 +526,11 @@ class Window(QMainWindow):
                 isin_params = self.params.param('Instruments').param(isin)
             except KeyError:
                 continue
-            if not isin_params['Plot']:
-                continue
 
-            # date = self.get_selected_date()
-            # app_bond.update_data(date=date)
+            is_enabled.append(isin_params['Enabled'])
+            app_bond.update_data(date=self.get_selected_date())
             prices.append(app_bond.price)
+            yields.append(app_bond.yld)
             maturities.append(app_bond.years_to_maturity)
             dv01s.append(app_bond.dv01)
             durations.append(app_bond.duration)
@@ -537,29 +539,69 @@ class Window(QMainWindow):
             notionals.append(isin_params['Notional'] + self.current_hedge.get(isin, 0))
             is_hedge.append(isin_params['HedgeInstrument'])
 
-        # Sort The Arrays By Maturity
+            # This is for PCA, contains all Historic Close Yield Data
+            yld_data = app_bond.get_current_yield_data()
+            prc_data = app_bond.get_current_price_data()
+            close_yld = yld_data.set_index('Date')[['Close']]
+            close_yld.columns = [app_bond.instrument_id]
+            close_prc = prc_data.set_index('Date')[['Close']]
+            close_prc.columns = [app_bond.instrument_id]
+            yld_series.append(close_yld)
+            price_series.append(close_prc)
+
+            # This is for volatility
+            volatilities.append(app_bond.compute_volatility(vola_type))
+
+        try:
+            yld_series = pd.concat(yld_series, axis=1)
+            price_series = pd.concat(price_series, axis=1)
+        except ValueError:
+            yld_series = None
+            price_series = None
+
         sorted_indexes = np.argsort(maturities)
-        maturities = np.array([maturities[x] for x in sorted_indexes])
-        prices = np.array([prices[x] for x in sorted_indexes])
-        notionals = np.array([notionals[x] for x in sorted_indexes])
-        isins = [isins[x] for x in sorted_indexes]
-        is_hedge = [is_hedge[x] for x in sorted_indexes]
-        dv01s = np.array([dv01s[x] for x in sorted_indexes])
-        durations = np.array([durations[x] for x in sorted_indexes])
-        convexities = np.array([convexities[x] for x in sorted_indexes])
+        self.isins = [isins[x] for x in sorted_indexes]
+        self.is_hedge = [is_hedge[x] for x in sorted_indexes]
+        self.is_enabled = np.array([is_enabled[x] for x in sorted_indexes])
+        self.maturities = np.array([maturities[x] for x in sorted_indexes])
+        self.volatilities = np.array([volatilities[x] for x in sorted_indexes])
+        self.prices = np.array([prices[x] for x in sorted_indexes])
+        self.yields = np.array([yields[x] for x in sorted_indexes])
+        self.notionals = np.array([notionals[x] for x in sorted_indexes])
+        self.dv01s = np.array([dv01s[x] for x in sorted_indexes])
+        self.durations = np.array([durations[x] for x in sorted_indexes])
+        self.convexities = np.array([convexities[x] for x in sorted_indexes])
+        self.yield_series = yld_series[self.isins].fillna(method='ffill') if yld_series is not None else None
+        self.price_series = price_series[self.isins].fillna(method='ffill') if price_series is not None else None
+
+    def update_hedge_plot(self):
+        self.apply_hedge()
+        multiply_by_notionals = self.params.param("Hedge Options").param('Notional Multiply').value()
+
+        dv01s = self.dv01s
+        durations = self.durations
+        convexities = self.convexities
+        isins = self.isins
+        notionals = self.notionals
+        prices = self.prices
+        is_hedge = self.is_hedge
 
         # Check If we want raw metrics or portfolio metrics
-        if multiply_by_notionals:
-            dv01s *= notionals / 100
-            durations *= notionals * prices/100 / np.sum(notionals)
-            convexities *= notionals * prices/100 / np.sum(notionals)
+        portfolio_dv01 = dv01s * notionals / 100
+        portfolio_duration = 0.0
+        portfolio_convexity = 0.0
+        if np.sum(notionals)!=0:
+            portfolio_duration = (durations * notionals * prices) / (100 * np.sum(notionals))
+            portfolio_convexity = (convexities * notionals * prices) / (100 * np.sum(notionals))
 
         # Make plots:
         for plot in [self.dv01_plot, self.duration_plot, self.convexity_plot]:
             plot.clear()
-        bargraph1 = pg.BarGraphItem(x=maturities, height=dv01s, width=0.3, brush='#43bce8')
-        bargraph2 = pg.BarGraphItem(x=maturities, height=durations, width=0.3, brush='#43bce8')
-        bargraph3 = pg.BarGraphItem(x=maturities, height=convexities, width=0.3, brush='#43bce8')
+
+        bargraph1 = pg.BarGraphItem(x=self.maturities, height=dv01s, width=0.3, brush='#43bce8')
+        bargraph2 = pg.BarGraphItem(x=self.maturities, height=durations, width=0.3, brush='#43bce8')
+        bargraph3 = pg.BarGraphItem(x=self.maturities, height=convexities, width=0.3, brush='#43bce8')
+
         self.dv01_plot.addItem(bargraph1)
         self.duration_plot.addItem(bargraph2)
         self.convexity_plot.addItem(bargraph3)
@@ -590,40 +632,8 @@ class Window(QMainWindow):
         if len(self.instruments) < 2:
             return
 
-        corr_price = []
-        corr_yield = []
-        maturities = []
-        isins = []
-        for i, isin in enumerate(self.instruments.keys()):
-            app_bond = self.instruments[isin]
-            assert isinstance(app_bond, AppBond)
-            try:
-                isin_params = self.params.param('Instruments').param(isin)
-            except KeyError:
-                continue
-            if not isin_params['Plot']:
-                continue
-
-            prc_data = app_bond.get_current_price_data()
-            yld_data = app_bond.get_current_yield_data()
-
-            corr_price.append(prc_data.set_index('Date')[['Close']].rename(columns={'Close': isin}))
-            corr_yield.append(yld_data.set_index('Date')[['Close']].rename(columns={'Close': isin}))
-
-            maturities.append(app_bond.bond.maturity_date)
-            isins.append(app_bond.instrument_id)
-
-        sorted_indexes = np.argsort(maturities)
-        sorted_isins = [isins[x] for x in sorted_indexes]
-
-        corr_price = pd.concat(corr_price, axis=1)[sorted_isins]
-        corr_yield = pd.concat(corr_yield, axis=1)[sorted_isins]
-
-        corr_price = corr_price.corr()
-        corr_yield = corr_yield.corr()
-
-        self.plot_correlogram(self.yield_corr_plot, corr_yield)
-        self.plot_correlogram(self.price_corr_plot, corr_price)
+        self.plot_correlogram(self.yield_corr_plot, self.yield_series.corr())
+        self.plot_correlogram(self.price_corr_plot,  self.price_series.corr())
 
     def plot_correlogram(self, parent, data):
         correlogram = pg.ImageItem()
@@ -642,43 +652,54 @@ class Window(QMainWindow):
         bar = pg.ColorBarItem(values=(-1, 1), colorMap=colorMap)
         bar.setImageItem(correlogram, insert_in=parent)
 
+    # ---------------------------- HEDGE ----------------------------------
     def apply_hedge(self):
         notionals_change = self.instrument_properties_have_changed('latest_notionals', 'Notional')
         h_instruments_change = self.instrument_properties_have_changed('current_hedge_instruments', 'HedgeInstrument')
         date_changed = self.date_picker_changed()
         if notionals_change or h_instruments_change or date_changed:
-            hedge_instrument = ""
-            NPD = 0
-            PA = 0
-            DA = 0
-            for i, isin in enumerate(self.instruments.keys()):
-                app_bond = self.instruments[isin]
-                assert isinstance(app_bond, AppBond)
-                try:
-                    isin_params = self.params.param('Instruments').param(isin)
-                except KeyError:
-                    continue
+            self.dv01_hedge()
 
-                date = self.get_selected_date()
-                app_bond.update_data(date=date)
+    def dv01_hedge(self):
+        hedge_instrument = ""
+        NP = 0
+        D = 0
+        PA = 0
+        DA = 0
+        notionals = []
+        for i, isin in enumerate(self.instruments.keys()):
+            app_bond = self.instruments[isin]
+            assert isinstance(app_bond, AppBond)
+            try:
+                isin_params = self.params.param('Instruments').param(isin)
+            except KeyError:
+                continue
 
-                if isin_params['HedgeInstrument']:
-                    if PA == 0:
-                        PA = app_bond.price
-                        DA = app_bond.duration
-                        hedge_instrument = app_bond.instrument_id
-                    else:
-                        print("More than one hedge instrument selected for Duration hedge, ignoring")
+            # date = self.get_selected_date()
+            # app_bond.update_data(date=date)
+
+            if isin_params['HedgeInstrument']:
+                if PA == 0:
+                    PA = app_bond.price
+                    DA = app_bond.duration
+                    hedge_instrument = app_bond.instrument_id
                 else:
-                    NPD += isin_params['Notional'] * app_bond.price / 100 * app_bond.duration
-
-            if DA != 0:
-                NA = - NPD / (PA * DA) * 100
+                    print("More than one hedge instrument selected for Duration hedge, ignoring")
             else:
-                NA = 0
-            self.current_hedge = {hedge_instrument: NA}
-            print("Hedge Calculated! : ", self.current_hedge)
+                NP += isin_params['Notional'] * app_bond.price / 100
+                D += isin_params['Notional'] * app_bond.duration
+                notionals.append(isin_params['Notional'])
 
+        if np.sum(notionals) != 0:
+            D /= np.sum(notionals)
+
+        if DA != 0:
+            NA = - NP * D / (PA * DA) * 100
+        else:
+            NA = 0
+        self.current_hedge = {hedge_instrument: NA}
+
+    # ------------------------- CHANGE SIGNALS -----------------------------
     def instrument_properties_have_changed(self, property, instrument_param):
         attr = {}
         for i, isin in enumerate(self.instruments.keys()):
@@ -706,11 +727,15 @@ class Window(QMainWindow):
             self.selected_date = current
             return True
 
+    # ------------------------- PARAM CHANGE -------------------------------
     def params_change_manager(self):
+        AppLogger.print("Calling - params_change_manager")
+
         if len(self.instruments) == 0:
             return
 
-        # Computes:
+        # Update Data:
+        self.update_all_instrument_properties()
         self.update_pca_computation()
 
         # Tab 1 Update:
