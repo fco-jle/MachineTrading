@@ -215,6 +215,13 @@ class Window(QMainWindow):
         self.yield_series = None
         self.price_series = None
 
+        # Hedging Functions:
+        self.hedge_funcs = {'Duration': self.duration_hedge,
+                            'Duration-Convexity': self.duration_hedge,
+                            'YieldVariance': self.duration_hedge,
+                            'PriceVariance': self.duration_hedge,
+                            }
+
     def update_yield_surface_plot(self):
         self.yield_surface_plot.clear()
         if len(self.maturities) < 4:
@@ -373,7 +380,7 @@ class Window(QMainWindow):
             self.objectGroup,
             Parameter.create(name='Hedge Options', type='group', children=[
                 dict(name='Hedge Type', type='list',
-                     limits=["DV01", "DV01-Convexity", "YieldVariance", "PriceVariance"], value="DV01"),
+                     limits=["Duration", "Duration-Convexity", "YieldVariance", "PriceVariance"], value="Duration"),
                 dict(name='Notional Multiply', type='bool', value=False)
             ])
         ])
@@ -556,6 +563,16 @@ class Window(QMainWindow):
             self.pca_data = {}
         self.update_pca_plot()
 
+    def update_all_instruments_single_property(self, property_name, property_item, to_array=True):
+        prop_list = []
+        for i, isin in enumerate(self.instruments.keys()):
+            isin_params = self.params.param('Instruments').param(isin)
+            prop_list.append(isin_params[property_name])
+        prop_list = [prop_list[i] for i in self.sorted_indexes]
+        if to_array:
+            prop_list = np.array(prop_list)
+        self.__setattr__(property_item, prop_list)
+
     def update_all_instrument_properties(self):
         AppLogger.print("Calling - update_all_instrument_properties")
         maturities = []
@@ -564,6 +581,7 @@ class Window(QMainWindow):
         convexities = []
         isins = []
         notionals = []
+        hedge_notionals = []
         prices = []
         yields = []
         is_hedge = []
@@ -591,7 +609,8 @@ class Window(QMainWindow):
             durations.append(app_bond.duration)
             convexities.append(app_bond.convexity)
             isins.append(app_bond.instrument_id)
-            notionals.append(isin_params['Notional'] + self.current_hedge.get(isin, 0))
+            notionals.append(isin_params['Notional'])
+            hedge_notionals.append(self.current_hedge.get(isin, 0))
             is_hedge.append(isin_params['HedgeInstrument'])
 
             # This is for PCA, contains all Historic Close Yield Data
@@ -615,6 +634,7 @@ class Window(QMainWindow):
             price_series = None
 
         sorted_indexes = np.argsort(maturities)
+        self.sorted_indexes = sorted_indexes
         self.isins = [isins[x] for x in sorted_indexes]
         self.is_hedge = [is_hedge[x] for x in sorted_indexes]
         self.is_enabled = np.array([is_enabled[x] for x in sorted_indexes])
@@ -623,14 +643,14 @@ class Window(QMainWindow):
         self.prices = np.array([prices[x] for x in sorted_indexes])
         self.yields = np.array([yields[x] for x in sorted_indexes])
         self.notionals = np.array([notionals[x] for x in sorted_indexes])
+        self.hedge_notionals = np.array([hedge_notionals[x] for x in sorted_indexes])
         self.dv01s = np.array([dv01s[x] for x in sorted_indexes])
         self.durations = np.array([durations[x] for x in sorted_indexes])
         self.convexities = np.array([convexities[x] for x in sorted_indexes])
         self.yield_series = yld_series[self.isins].fillna(method='ffill') if yld_series is not None else None
         self.price_series = price_series[self.isins].fillna(method='ffill') if price_series is not None else None
 
-    def update_hedge_plot(self):
-        self.apply_hedge()
+    def update_hedge_tab(self):
         multiply_by_notionals = self.params.param("Hedge Options").param('Notional Multiply').value()
 
         dv01s = self.dv01s
@@ -638,16 +658,18 @@ class Window(QMainWindow):
         convexities = self.convexities
         isins = self.isins
         notionals = self.notionals
+        hedge_notionals = self.hedge_notionals
         prices = self.prices
         is_hedge = self.is_hedge
 
         # Check If we want raw metrics or portfolio metrics
-        portfolio_dv01 = dv01s * notionals / 100
+        portfolio_dv01 = np.sum(dv01s * notionals / 100)
         portfolio_duration = 0.0
         portfolio_convexity = 0.0
-        if np.sum(notionals)!=0:
-            portfolio_duration = (durations * notionals * prices) / (100 * np.sum(notionals))
-            portfolio_convexity = (convexities * notionals * prices) / (100 * np.sum(notionals))
+        total_notional = notionals+hedge_notionals
+        if np.sum(total_notional)!=0:
+            portfolio_duration = np.sum((durations * total_notional * prices) / (100 * np.sum(total_notional)))
+            portfolio_convexity = np.sum((convexities * total_notional * prices) / (100 * np.sum(total_notional)))
 
         # Make plots:
         for plot in [self.dv01_plot, self.duration_plot, self.convexity_plot]:
@@ -658,8 +680,13 @@ class Window(QMainWindow):
         bargraph3 = pg.BarGraphItem(x=self.maturities, height=convexities, width=0.3, brush='#43bce8')
 
         self.dv01_plot.addItem(bargraph1)
+        self.dv01_plot.setTitle(f"<font size='5'> DV01 : {round(portfolio_dv01, 2)}</font>")
+
         self.duration_plot.addItem(bargraph2)
+        self.duration_plot.setTitle(f"<font size='5'> Duration : {round(portfolio_duration, 2)} </font>")
+
         self.convexity_plot.addItem(bargraph3)
+        self.convexity_plot.setTitle(f"<font size='5'> Convexity : {round(portfolio_convexity, 2)}</font>")
 
         # Build The Table:
         data = []
@@ -669,6 +696,7 @@ class Window(QMainWindow):
                          durations[i],
                          convexities[i],
                          notionals[i],
+                         hedge_notionals[i],
                          is_hedge[i])
                         )
 
@@ -678,15 +706,14 @@ class Window(QMainWindow):
                                      ('Duration', float),
                                      ('Convexity', float),
                                      ('Notional', float),
+                                     ('HedgeNotional', float),
                                      ('IsHedge', bool)])
         self.hedge_data_table.setData(data_array)
 
     def update_correlation_plots(self):
         self.yield_corr_plot.clear()
-
         if len(self.instruments) < 2:
             return
-
         self.plot_correlogram(self.yield_corr_plot, self.yield_series.corr())
         self.plot_correlogram(self.price_corr_plot,  self.price_series.corr())
 
@@ -713,9 +740,32 @@ class Window(QMainWindow):
         h_instruments_change = self.instrument_properties_have_changed('current_hedge_instruments', 'HedgeInstrument')
         date_changed = self.date_picker_changed()
         if notionals_change or h_instruments_change or date_changed:
-            self.dv01_hedge()
+            # Need to Update the vectors indicating which bonds are hedge instruments and the notional
+            self.update_all_instruments_single_property(property_name='HedgeInstrument', property_item="is_hedge")
+            self.update_all_instruments_single_property(property_name='Notional', property_item="notionals")
+            self.hedge_funcs[self.params.param('Hedge Options').param('Hedge Type').value()]()
+            self.update_hedge_tab()  # Update thed Hedge Tab in the App
 
-    def dv01_hedge(self):
+    def duration_hedge(self):
+        notionals = self.notionals
+        durations = self.durations
+        prices = self.prices
+        is_hedge = self.is_hedge
+        isins = self.isins
+        try:
+            hedge_instrument = [isins[i] for i in range(len(isins)) if is_hedge[i]==True]
+            if len(hedge_instrument) > 1:
+                AppLogger.print(f"More than one hedge instrument selected, defaulting to {hedge_instrument}")
+                is_hedge = [1  if isin == hedge_instrument[0] else 0 for isin in self.isins ]
+            hedge_instrument = hedge_instrument[0]
+            hedge_notional = -np.dot(prices*notionals, durations)/(np.sum(prices*durations*is_hedge))
+            self.current_hedge = {hedge_instrument: hedge_notional}
+        except:
+            self.current_hedge = {}
+
+        self.hedge_notionals = np.array([self.current_hedge.get(isin, 0) for isin in self.isins])
+
+    def backup_duration_hedge(self):
         hedge_instrument = ""
         NP = 0
         D = 0
@@ -730,9 +780,6 @@ class Window(QMainWindow):
             except KeyError:
                 continue
 
-            # date = self.get_selected_date()
-            # app_bond.update_data(date=date)
-
             if isin_params['HedgeInstrument']:
                 if PA == 0:
                     PA = app_bond.price
@@ -740,10 +787,10 @@ class Window(QMainWindow):
                     hedge_instrument = app_bond.instrument_id
                 else:
                     print("More than one hedge instrument selected for Duration hedge, ignoring")
-            else:
-                NP += isin_params['Notional'] * app_bond.price / 100
-                D += isin_params['Notional'] * app_bond.duration
-                notionals.append(isin_params['Notional'])
+
+            NP += isin_params['Notional'] * app_bond.price / 100
+            D += isin_params['Notional'] * app_bond.duration
+            notionals.append(isin_params['Notional'])
 
         if np.sum(notionals) != 0:
             D /= np.sum(notionals)
@@ -752,6 +799,7 @@ class Window(QMainWindow):
             NA = - NP * D / (PA * DA) * 100
         else:
             NA = 0
+
         self.current_hedge = {hedge_instrument: NA}
 
     # ------------------------- CHANGE SIGNALS -----------------------------
@@ -773,13 +821,10 @@ class Window(QMainWindow):
             return False
 
     def date_picker_changed(self):
-        latest = self.selected_date
-        current = self.get_selected_date()
-
-        if latest == current:
+        if self.selected_date == self.get_selected_date():
             return False
         else:
-            self.selected_date = current
+            self.selected_date = self.get_selected_date()
             return True
 
     # ------------------------- PARAM CHANGE -------------------------------
@@ -800,7 +845,7 @@ class Window(QMainWindow):
         self.update_yield_surface_plot()
 
         # Tab 2 Update:
-        self.update_hedge_plot()
+        self.update_hedge_tab()
 
 
 if __name__ == "__main__":
