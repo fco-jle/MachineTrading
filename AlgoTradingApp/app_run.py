@@ -187,6 +187,7 @@ class Window(QMainWindow):
         self.instruments = {}
         self.latest_notionals = {}
         self.selected_date = dt.date
+        self.current_hedge_method = None
         self.current_hedge = {}
         self.current_hedge_instruments = {}
         self.objectGroup = InstrumentsGroupParam()
@@ -217,7 +218,7 @@ class Window(QMainWindow):
 
         # Hedging Functions:
         self.hedge_funcs = {'Duration': self.duration_hedge,
-                            'Duration-Convexity': self.duration_hedge,
+                            'Duration-Convexity': self.duration_convexity_hedge,
                             'YieldVariance': self.duration_hedge,
                             'PriceVariance': self.duration_hedge,
                             }
@@ -397,6 +398,7 @@ class Window(QMainWindow):
         self.params.param('Data Params').param('Yield Curve Date').sigValueChanged.connect(self.params_change_manager)
         self.params.param('Data Params').param('PCA Components').sigValueChanged.connect(self.update_pca_computation)
         self.params.param('Data Params').param('Volatility Type').sigValueChanged.connect(self.update_volatility)
+        self.params.param('Hedge Options').param('Hedge Type').sigValueChanged.connect(self.apply_hedge)
 
         preset_dir = os.path.join(os.path.abspath(os.path.dirname(sys.argv[0])), 'presets')
         if os.path.exists(preset_dir):
@@ -738,8 +740,9 @@ class Window(QMainWindow):
     def apply_hedge(self):
         notionals_change = self.instrument_properties_have_changed('latest_notionals', 'Notional')
         h_instruments_change = self.instrument_properties_have_changed('current_hedge_instruments', 'HedgeInstrument')
+        method_change = self.hedge_method_changed()
         date_changed = self.date_picker_changed()
-        if notionals_change or h_instruments_change or date_changed:
+        if notionals_change or h_instruments_change or date_changed or method_change:
             # Need to Update the vectors indicating which bonds are hedge instruments and the notional
             self.update_all_instruments_single_property(property_name='HedgeInstrument', property_item="is_hedge")
             self.update_all_instruments_single_property(property_name='Notional', property_item="notionals")
@@ -747,60 +750,42 @@ class Window(QMainWindow):
             self.update_hedge_tab()  # Update thed Hedge Tab in the App
 
     def duration_hedge(self):
-        notionals = self.notionals
-        durations = self.durations
-        prices = self.prices
         is_hedge = self.is_hedge
-        isins = self.isins
         try:
-            hedge_instrument = [isins[i] for i in range(len(isins)) if is_hedge[i]==True]
+            hedge_instrument = [self.isins[i] for i in range(len(self.isins)) if is_hedge[i]==True]
             if len(hedge_instrument) > 1:
                 AppLogger.print(f"More than one hedge instrument selected, defaulting to {hedge_instrument}")
                 is_hedge = [1  if isin == hedge_instrument[0] else 0 for isin in self.isins ]
-            hedge_instrument = hedge_instrument[0]
-            hedge_notional = -np.dot(prices*notionals, durations)/(np.sum(prices*durations*is_hedge))
-            self.current_hedge = {hedge_instrument: hedge_notional}
+            hnot = -np.dot(self.prices*self.notionals, self.durations)/(np.sum(self.prices*self.durations*is_hedge))
+            self.current_hedge = {hedge_instrument[0]: hnot}
         except:
             self.current_hedge = {}
-
         self.hedge_notionals = np.array([self.current_hedge.get(isin, 0) for isin in self.isins])
 
-    def backup_duration_hedge(self):
-        hedge_instrument = ""
-        NP = 0
-        D = 0
-        PA = 0
-        DA = 0
-        notionals = []
-        for i, isin in enumerate(self.instruments.keys()):
-            app_bond = self.instruments[isin]
-            assert isinstance(app_bond, AppBond)
-            try:
-                isin_params = self.params.param('Instruments').param(isin)
-            except KeyError:
-                continue
+    def duration_convexity_hedge(self):
+        is_hedge = self.is_hedge
+        if np.sum(is_hedge) != 2:
+            AppLogger.print("You need exactly 2 instruments to hedge via Duration-COnvexity")
+            self.current_hedge = {}
 
-            if isin_params['HedgeInstrument']:
-                if PA == 0:
-                    PA = app_bond.price
-                    DA = app_bond.duration
-                    hedge_instrument = app_bond.instrument_id
-                else:
-                    print("More than one hedge instrument selected for Duration hedge, ignoring")
-
-            NP += isin_params['Notional'] * app_bond.price / 100
-            D += isin_params['Notional'] * app_bond.duration
-            notionals.append(isin_params['Notional'])
-
-        if np.sum(notionals) != 0:
-            D /= np.sum(notionals)
-
-        if DA != 0:
-            NA = - NP * D / (PA * DA) * 100
         else:
-            NA = 0
+            hedge_instrument = [self.isins[i] for i in range(len(self.isins)) if is_hedge[i]==True]
+            idx = [i for i in range(len(self.isins)) if is_hedge[i] == True]
+            is_hedge = [1 if isin in hedge_instrument else 0 for isin in self.isins]
 
-        self.current_hedge = {hedge_instrument: NA}
+            a = np.array([
+                [self.prices[idx[0]]*self.durations[idx[0]], self.prices[idx[1]]*self.durations[idx[1]]],
+                [self.prices[idx[0]]*self.convexities[idx[0]], self.prices[idx[1]]*self.convexities[idx[1]]]
+            ])
+            b = np.array([-np.dot(self.prices*self.notionals, self.durations),
+                          -np.dot(self.prices*self.notionals, self.convexities)
+                          ])
+            x = np.linalg.solve(a, b)
+
+            self.current_hedge = {hedge_instrument[0]: x[0],
+                                  hedge_instrument[1]: x[1]}
+
+        self.hedge_notionals = np.array([self.current_hedge.get(isin, 0) for isin in self.isins])
 
     # ------------------------- CHANGE SIGNALS -----------------------------
     def instrument_properties_have_changed(self, property, instrument_param):
@@ -826,6 +811,15 @@ class Window(QMainWindow):
         else:
             self.selected_date = self.get_selected_date()
             return True
+
+    def hedge_method_changed(self):
+        method = self.params.param('Hedge Options').param('Hedge Type').value()
+        if self.current_hedge_method == method:
+            return False
+        else:
+            self.current_hedge_method = method
+            return True
+
 
     # ------------------------- PARAM CHANGE -------------------------------
     def params_change_manager(self):
