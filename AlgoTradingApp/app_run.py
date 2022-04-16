@@ -192,6 +192,16 @@ class Window(QMainWindow):
         self.current_hedge_instruments = {}
         self.objectGroup = InstrumentsGroupParam()
 
+        # Hedge Functions:
+        self.hedge_funcs = {'Duration': self.duration_hedge,
+                            'Duration-Convexity': self.duration_convexity_hedge,
+                            'Duration-Convexity-DV01': self.duration_convexity_dv01_hedge,
+                            'YieldVariance': self.duration_hedge,
+                            'PriceVariance': self.duration_hedge,
+                            'Quadratic': self.quadratic_hedge,
+                            'Cubic':self.cubic_hedge,
+                            }
+
         # Plot Layout
         self.setup_gui()
         self.setup_gui_2()
@@ -215,13 +225,6 @@ class Window(QMainWindow):
         self.convexities = np.zeros(1)
         self.yield_series = None
         self.price_series = None
-
-        # Hedging Functions:
-        self.hedge_funcs = {'Duration': self.duration_hedge,
-                            'Duration-Convexity': self.duration_convexity_hedge,
-                            'YieldVariance': self.duration_hedge,
-                            'PriceVariance': self.duration_hedge,
-                            }
 
     def update_yield_surface_plot(self):
         self.yield_surface_plot.clear()
@@ -381,7 +384,9 @@ class Window(QMainWindow):
             self.objectGroup,
             Parameter.create(name='Hedge Options', type='group', children=[
                 dict(name='Hedge Type', type='list',
-                     limits=["Duration", "Duration-Convexity", "YieldVariance", "PriceVariance"], value="Duration"),
+                     limits=list(self.hedge_funcs.keys()),
+                     # limits=["Duration", "Duration-Convexity", "YieldVariance", "PriceVariance", "Quadratic"],
+                     value="Duration"),
                 dict(name='Notional Multiply', type='bool', value=False)
             ])
         ])
@@ -399,6 +404,7 @@ class Window(QMainWindow):
         self.params.param('Data Params').param('PCA Components').sigValueChanged.connect(self.update_pca_computation)
         self.params.param('Data Params').param('Volatility Type').sigValueChanged.connect(self.update_volatility)
         self.params.param('Hedge Options').param('Hedge Type').sigValueChanged.connect(self.apply_hedge)
+        self.params.param("Hedge Options").param('Notional Multiply').sigValueChanged.connect(self.update_hedge_tab)
 
         preset_dir = os.path.join(os.path.abspath(os.path.dirname(sys.argv[0])), 'presets')
         if os.path.exists(preset_dir):
@@ -663,40 +669,66 @@ class Window(QMainWindow):
         hedge_notionals = self.hedge_notionals
         prices = self.prices
         is_hedge = self.is_hedge
+        total_notional = notionals + hedge_notionals
 
-        # Check If we want raw metrics or portfolio metrics
-        portfolio_dv01 = np.sum(dv01s * notionals / 100)
-        portfolio_duration = 0.0
-        portfolio_convexity = 0.0
-        total_notional = notionals+hedge_notionals
-        if np.sum(total_notional)!=0:
-            portfolio_duration = np.sum((durations * total_notional * prices) / (100 * np.sum(total_notional)))
-            portfolio_convexity = np.sum((convexities * total_notional * prices) / (100 * np.sum(total_notional)))
+        net_value = np.sum(total_notional * 100 * prices)
+        if net_value == 0:
+            net_value = 1E35
+
+        main_pf_dv01 = (dv01s * notionals * 100 * prices) / net_value
+        main_pf_duration = (durations * notionals * prices * 100) / net_value
+        main_pf_convexity = (convexities * notionals * prices * 100) / net_value
+
+        hedge_pf_dv01 = (dv01s * hedge_notionals*100*prices) / net_value
+        hedge_pf_duration = (durations * hedge_notionals * prices * 100) / net_value
+        hedge_pf_convexity = (convexities * hedge_notionals * prices * 100) / net_value
+
+        total_pf_dv01 = (dv01s * total_notional * prices * 100) / net_value
+        total_pf_duration = (durations * total_notional * prices * 100) / net_value
+        total_pf_convexity = (convexities * total_notional * prices * 100) / net_value
 
         # Make plots:
         for plot in [self.dv01_plot, self.duration_plot, self.convexity_plot]:
             plot.clear()
 
-        bargraph1 = pg.BarGraphItem(x=self.maturities, height=dv01s, width=0.3, brush='#43bce8')
-        bargraph2 = pg.BarGraphItem(x=self.maturities, height=durations, width=0.3, brush='#43bce8')
-        bargraph3 = pg.BarGraphItem(x=self.maturities, height=convexities, width=0.3, brush='#43bce8')
+        if multiply_by_notionals:
+            bargraph_dv01_1 = pg.BarGraphItem(x=self.maturities, height=main_pf_dv01, width=0.2, brush='#43bce8')
+            bargraph_dv01_2 = pg.BarGraphItem(x=self.maturities, height=hedge_pf_dv01, width=0.2, brush='#d6564d')
+            self.dv01_plot.addItem(bargraph_dv01_1)
+            self.dv01_plot.addItem(bargraph_dv01_2)
 
-        self.dv01_plot.addItem(bargraph1)
-        self.dv01_plot.setTitle(f"<font size='5'> DV01 : {round(portfolio_dv01, 2)}</font>")
+            bargraph_dur_1 = pg.BarGraphItem(x=self.maturities, height=main_pf_duration, width=0.2, brush='#43bce8')
+            bargraph_dur_2 = pg.BarGraphItem(x=self.maturities, height=hedge_pf_duration, width=0.2, brush='#d6564d')
+            self.duration_plot.addItem(bargraph_dur_1)
+            self.duration_plot.addItem(bargraph_dur_2)
 
-        self.duration_plot.addItem(bargraph2)
-        self.duration_plot.setTitle(f"<font size='5'> Duration : {round(portfolio_duration, 2)} </font>")
+            bargraph_conv_1 = pg.BarGraphItem(x=self.maturities, height=main_pf_convexity, width=0.2, brush='#43bce8')
+            bargraph_conv_2 = pg.BarGraphItem(x=self.maturities, height=hedge_pf_convexity, width=0.2, brush='#d6564d')
+            self.convexity_plot.addItem(bargraph_conv_1)
+            self.convexity_plot.addItem(bargraph_conv_2)
 
-        self.convexity_plot.addItem(bargraph3)
-        self.convexity_plot.setTitle(f"<font size='5'> Convexity : {round(portfolio_convexity, 2)}</font>")
+        else:
+            bargraph1 = pg.BarGraphItem(x=self.maturities, height=dv01s, width=0.2, brush='#43bce8')
+            bargraph2 = pg.BarGraphItem(x=self.maturities, height=durations, width=0.2, brush='#43bce8')
+            bargraph3 = pg.BarGraphItem(x=self.maturities, height=convexities, width=0.2, brush='#43bce8')
+            self.dv01_plot.addItem(bargraph1)
+            self.duration_plot.addItem(bargraph2)
+            self.convexity_plot.addItem(bargraph3)
+
+        self.dv01_plot.setTitle(f"<font size='5'> DV01 : {round(np.sum(total_pf_dv01), 2)}</font>")
+        self.duration_plot.setTitle(f"<font size='5'> Duration : {str(round(np.sum(total_pf_duration), 2))} </font>")
+        self.convexity_plot.setTitle(f"<font size='5'> Convexity : {str(round(np.sum(total_pf_convexity), 2))}</font>")
 
         # Build The Table:
         data = []
         for i in range(len(isins)):
             data.append((isins[i],
                          dv01s[i],
+                         total_pf_dv01[i],
                          durations[i],
+                         total_pf_duration[i],
                          convexities[i],
+                         total_pf_convexity[i],
                          notionals[i],
                          hedge_notionals[i],
                          is_hedge[i])
@@ -705,11 +737,15 @@ class Window(QMainWindow):
         data_array = np.array(data,
                               dtype=[('Isin', object),
                                      ('DV01', float),
+                                     ('DV01 PF', float),
                                      ('Duration', float),
+                                     ('Duration PF', float),
                                      ('Convexity', float),
+                                     ('Convexity PF', float),
                                      ('Notional', float),
                                      ('HedgeNotional', float),
                                      ('IsHedge', bool)])
+
         self.hedge_data_table.setData(data_array)
 
     def update_correlation_plots(self):
@@ -762,6 +798,61 @@ class Window(QMainWindow):
             self.current_hedge = {}
         self.hedge_notionals = np.array([self.current_hedge.get(isin, 0) for isin in self.isins])
 
+    def quadratic_hedge(self):
+        is_hedge = self.is_hedge
+        if np.sum(is_hedge) != 2:
+            AppLogger.print("You need exactly 2 instruments to hedge via Duration-COnvexity")
+            self.current_hedge = {}
+
+        else:
+            hedge_instrument = [self.isins[i] for i in range(len(self.isins)) if is_hedge[i] == True]
+            idx = [i for i in range(len(self.isins)) if is_hedge[i] == True]
+            is_hedge = [1 if isin in hedge_instrument else 0 for isin in self.isins]
+
+            a = np.array([
+                [self.prices[idx[0]] * self.durations[idx[0]], self.prices[idx[1]] * self.durations[idx[1]]],
+                [self.prices[idx[0]] * self.durations[idx[0]] * self.maturities[idx[0]], self.prices[idx[1]] * self.convexities[idx[1]] * self.maturities[idx[1]]]
+            ])
+            b = np.array([-np.dot(self.prices * self.notionals, self.durations),
+                          -np.dot(self.prices * self.notionals, self.durations * self.maturities)
+                          ])
+            x = np.linalg.solve(a, b)
+
+            self.current_hedge = {hedge_instrument[0]: x[0],
+                                  hedge_instrument[1]: x[1]}
+
+        self.hedge_notionals = np.array([self.current_hedge.get(isin, 0) for isin in self.isins])
+
+    def cubic_hedge(self):
+        is_hedge = self.is_hedge
+        if np.sum(is_hedge) != 3:
+            AppLogger.print("You need exactly 3 instruments to hedge via Duration-COnvexity")
+            self.current_hedge = {}
+        else:
+            hedge_instrument = [self.isins[i] for i in range(len(self.isins)) if is_hedge[i] == True]
+            idx = [i for i in range(len(self.isins)) if is_hedge[i] == True]
+            main_portfolio_indexes = [i for i in range(len(self.isins)) if self.notionals[i] != 0]
+
+            T = np.max([self.maturities[i] for i in main_portfolio_indexes])
+            NP = np.sum(self.notionals*self.prices)
+            D = np.sum(self.notionals*self.durations) / np.sum(self.notionals)
+            C = np.sum(self.convexities*self.durations) / np.sum(self.durations)
+
+            PA, DA, TA = self.prices[idx[0]], self.durations[idx[0]], self.maturities[idx[0]]
+            PB, DB, TB = self.prices[idx[1]], self.durations[idx[1]], self.maturities[idx[1]]
+            PC, DC, TC = self.prices[idx[2]], self.durations[idx[2]], self.maturities[idx[2]]
+
+            NA = - NP*D/(PA*DA) * ((T-TC)*(T-TB))/ ((TB-TA)*(TC-TA))
+            NB = - NP*D/(PB*DB) * ((T-TC)*(T-TA))/((TB-TA)*(TB-TC))
+            NC = - NP*D/(PC*DC) * ((TB-T)*(T-TA))/((TC-TA)*(TB-TC))
+
+            self.current_hedge = {hedge_instrument[0]: NA,
+                                  hedge_instrument[1]: NB,
+                                  hedge_instrument[2]: NC
+                                  }
+
+        self.hedge_notionals = np.array([self.current_hedge.get(isin, 0) for isin in self.isins])
+
     def duration_convexity_hedge(self):
         is_hedge = self.is_hedge
         if np.sum(is_hedge) != 2:
@@ -784,6 +875,34 @@ class Window(QMainWindow):
 
             self.current_hedge = {hedge_instrument[0]: x[0],
                                   hedge_instrument[1]: x[1]}
+
+        self.hedge_notionals = np.array([self.current_hedge.get(isin, 0) for isin in self.isins])
+
+    def duration_convexity_dv01_hedge(self):
+        is_hedge = self.is_hedge
+        if np.sum(is_hedge) != 3:
+            AppLogger.print("You need exactly 2 instruments to hedge via Duration-COnvexity")
+            self.current_hedge = {}
+
+        else:
+            hedge_instrument = [self.isins[i] for i in range(len(self.isins)) if is_hedge[i]==True]
+            idx = [i for i in range(len(self.isins)) if is_hedge[i] == True]
+            is_hedge = [1 if isin in hedge_instrument else 0 for isin in self.isins]
+
+            a = np.array([
+                [self.prices[i] * self.durations[i] for i in idx],
+                [self.prices[i] * self.convexities[i] for i in idx],
+                [self.prices[i] * self.dv01s[i] for i in idx]
+            ])
+            b = np.array([-np.dot(self.prices * self.notionals, self.durations),
+                          -np.dot(self.prices * self.notionals, self.convexities),
+                          -np.dot(self.prices * self.notionals, self.dv01s)
+                          ])
+            x = np.linalg.solve(a, b)
+
+            self.current_hedge = {hedge_instrument[0]: x[0],
+                                  hedge_instrument[1]: x[1],
+                                  hedge_instrument[2]: x[2]}
 
         self.hedge_notionals = np.array([self.current_hedge.get(isin, 0) for isin in self.isins])
 
@@ -819,7 +938,6 @@ class Window(QMainWindow):
         else:
             self.current_hedge_method = method
             return True
-
 
     # ------------------------- PARAM CHANGE -------------------------------
     def params_change_manager(self):
