@@ -13,7 +13,7 @@ def garman_klass(df):
 
 def standard_dev(df):
     close_ = df['Close'].values
-    return np.std(close_)/100
+    return np.std(close_)
 
 def close_to_close(df):
     close_ = df['Close'].values

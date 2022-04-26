@@ -4,7 +4,7 @@ import time
 import numpy as np
 import pandas as pd
 import datetime as dt
-
+from scipy.optimize import minimize
 from sklearn.decomposition import PCA
 
 from PyQt5.uic import loadUi
@@ -197,7 +197,7 @@ class Window(QMainWindow):
                             'Duration-Convexity': self.duration_convexity_hedge,
                             'Duration-Convexity-DV01': self.duration_convexity_dv01_hedge,
                             'YieldVariance': self.duration_hedge,
-                            'PriceVariance': self.duration_hedge,
+                            'PriceVariance': self.variance_minimization_hedge,
                             'Quadratic': self.quadratic_hedge,
                             'Cubic':self.cubic_hedge,
                             }
@@ -329,6 +329,8 @@ class Window(QMainWindow):
         self.pca_plot.setTitle("<font size='5'> PCA </font>")
         self.pca_plot.setLabels(left="<font size='4'>PCA</font>", bottom="<font size='4'>Maturity</font>")
 
+        self.pca_plot.addLegend()
+
     def setup_gui_2(self):
         self.hedgeSplitter = QtWidgets.QSplitter()
         self.hedgeSplitter.setOrientation(QtCore.Qt.Orientation.Horizontal)
@@ -352,6 +354,10 @@ class Window(QMainWindow):
         self.dv01_plot = self.hedgeInfoPlots.addPlot(row=0, col=0)
         self.duration_plot = self.hedgeInfoPlots.addPlot(row=1, col=0)
         self.convexity_plot = self.hedgeInfoPlots.addPlot(row=2, col=0)
+        self.hedge_daily_pl_plot = self.hedgeInfoPlots.addPlot(row=3, col=0, axisItems={'bottom': pg.DateAxisItem()})
+
+        self.hedge_daily_pl_plot.addLegend()
+
         self.duration_plot.setXLink(self.dv01_plot)
         self.convexity_plot.setXLink(self.dv01_plot)
 
@@ -361,10 +367,13 @@ class Window(QMainWindow):
         self.duration_plot.setLabels(left="<font size='4'>Duration</font>", bottom="<font size='4'>Maturity</font>")
         self.convexity_plot.setTitle("<font size='5'> Convexity </font>")
         self.convexity_plot.setLabels(left="<font size='4'>Convexity</font>", bottom="<font size='4'>Maturity</font>")
+        self.hedge_daily_pl_plot.setTitle("<font size='5'> Daily P&L Variations </font>")
+        self.hedge_daily_pl_plot.setLabels(left="<font size='4'>P&L</font>", bottom="<font size='4'>Date</font>")
 
         self.dv01_plot.showGrid(x=False, y=True)
         self.duration_plot.showGrid(x=False, y=True)
         self.convexity_plot.showGrid(x=False, y=True)
+        self.hedge_daily_pl_plot.showGrid(x=False, y=True)
 
     def setup_config(self):
         self.tree = ParameterTree(showHeader=False)
@@ -557,7 +566,7 @@ class Window(QMainWindow):
             n_comps = self.pca_data['Components'].shape[0]
             pens = [pg.mkPen(color=random_color()) for _ in range(n_comps)]
             for i in range(n_comps):
-                self.pca_plot.plot(self.pca_data['X'], self.pca_data['Components'][i], pen=pens[i])
+                self.pca_plot.plot(self.pca_data['X'], self.pca_data['Components'][i], pen=pens[i], name=f"Comp {i}")
 
     def update_pca_computation(self):
         sorted_df = self.yield_series
@@ -581,7 +590,7 @@ class Window(QMainWindow):
             prop_list = np.array(prop_list)
         self.__setattr__(property_item, prop_list)
 
-    def update_all_instrument_properties(self):
+    def update_all_instrument_properties(self, date=None):
         AppLogger.print("Calling - update_all_instrument_properties")
         maturities = []
         dv01s = []
@@ -599,6 +608,7 @@ class Window(QMainWindow):
         volatilities = []
         corr_price = []
         corr_yield = []
+        update_date = self.get_selected_date() if date is None else date
         vola_type = self.params.param('Data Params').param('Volatility Type').value()
         for i, isin in enumerate(self.instruments.keys()):
             app_bond = self.instruments[isin]
@@ -609,7 +619,7 @@ class Window(QMainWindow):
                 continue
 
             is_enabled.append(isin_params['Enabled'])
-            app_bond.update_data(date=self.get_selected_date())
+            app_bond.update_data(date=update_date)
             prices.append(app_bond.price)
             yields.append(app_bond.yld)
             maturities.append(app_bond.years_to_maturity)
@@ -659,8 +669,9 @@ class Window(QMainWindow):
         self.price_series = price_series[self.isins].fillna(method='ffill') if price_series is not None else None
 
     def update_hedge_tab(self):
-        multiply_by_notionals = self.params.param("Hedge Options").param('Notional Multiply').value()
+        # self.apply_hedge()
 
+        multiply_by_notionals = self.params.param("Hedge Options").param('Notional Multiply').value()
         dv01s = self.dv01s
         durations = self.durations
         convexities = self.convexities
@@ -671,24 +682,29 @@ class Window(QMainWindow):
         is_hedge = self.is_hedge
         total_notional = notionals + hedge_notionals
 
-        net_value = np.sum(total_notional * 100 * prices)
+        instrument_values = total_notional * prices * 100
+        net_value = np.sum(np.abs(total_notional) * prices * 100)
+        weights = instrument_values / net_value
         if net_value == 0:
             net_value = 1E35
 
-        main_pf_dv01 = (dv01s * notionals * 100 * prices) / net_value
-        main_pf_duration = (durations * notionals * prices * 100) / net_value
-        main_pf_convexity = (convexities * notionals * prices * 100) / net_value
+        # -----------------  DV01  -------------------
+        main_pf_dv01 = dv01s * instrument_values * np.invert(is_hedge) * 0.0001
+        hedge_pf_dv01 = dv01s * instrument_values * is_hedge * 0.0001
+        total_pf_dv01 = dv01s * instrument_values * 0.0001
 
-        hedge_pf_dv01 = (dv01s * hedge_notionals*100*prices) / net_value
-        hedge_pf_duration = (durations * hedge_notionals * prices * 100) / net_value
-        hedge_pf_convexity = (convexities * hedge_notionals * prices * 100) / net_value
+        # -----------------  Duration  -------------------
+        main_pf_duration =  durations * weights * np.invert(is_hedge)
+        hedge_pf_duration = durations * weights * is_hedge
+        total_pf_duration = durations * weights
 
-        total_pf_dv01 = (dv01s * total_notional * prices * 100) / net_value
-        total_pf_duration = (durations * total_notional * prices * 100) / net_value
-        total_pf_convexity = (convexities * total_notional * prices * 100) / net_value
+        # -----------------  Convexity  -------------------
+        main_pf_convexity = convexities  * weights * np.invert(is_hedge)
+        hedge_pf_convexity = convexities * weights * is_hedge
+        total_pf_convexity = convexities * weights
 
         # Make plots:
-        for plot in [self.dv01_plot, self.duration_plot, self.convexity_plot]:
+        for plot in [self.dv01_plot, self.duration_plot, self.convexity_plot, self.hedge_daily_pl_plot]:
             plot.clear()
 
         if multiply_by_notionals:
@@ -715,6 +731,11 @@ class Window(QMainWindow):
             self.duration_plot.addItem(bargraph2)
             self.convexity_plot.addItem(bargraph3)
 
+
+        # Compute P&L Variations
+        self.build_pnl_variations_plot()
+
+        # Plot
         self.dv01_plot.setTitle(f"<font size='5'> DV01 : {round(np.sum(total_pf_dv01), 2)}</font>")
         self.duration_plot.setTitle(f"<font size='5'> Duration : {str(round(np.sum(total_pf_duration), 2))} </font>")
         self.convexity_plot.setTitle(f"<font size='5'> Convexity : {str(round(np.sum(total_pf_convexity), 2))}</font>")
@@ -747,6 +768,22 @@ class Window(QMainWindow):
                                      ('IsHedge', bool)])
 
         self.hedge_data_table.setData(data_array)
+
+        print("Current Portfolio Variance:", self.compute_portfolio_variance())
+
+    def build_pnl_variations_plot(self):
+        # X Axis
+        dates = self.price_series.index[1:]
+        x = pd.Series(dates).view(np.int64) // 10 ** 9
+
+        # Y Axis
+        movements = self.price_series.diff().dropna().values
+        portfolio_pl_changes = np.sum((self.notionals) * 100 * movements, axis=1)
+        hedged_pl_changes = np.sum((self.notionals+self.hedge_notionals)*100*movements, axis=1)
+
+        # Plot
+        self.hedge_daily_pl_plot.plot(x, portfolio_pl_changes, pen=pg.mkPen(color='#43bce8'), name="Original")
+        self.hedge_daily_pl_plot.plot(x, hedged_pl_changes, pen=pg.mkPen(color='#d6564d'), name="Hedged")
 
     def update_correlation_plots(self):
         self.yield_corr_plot.clear()
@@ -787,15 +824,19 @@ class Window(QMainWindow):
 
     def duration_hedge(self):
         is_hedge = self.is_hedge
-        try:
-            hedge_instrument = [self.isins[i] for i in range(len(self.isins)) if is_hedge[i]==True]
-            if len(hedge_instrument) > 1:
-                AppLogger.print(f"More than one hedge instrument selected, defaulting to {hedge_instrument}")
-                is_hedge = [1  if isin == hedge_instrument[0] else 0 for isin in self.isins ]
-            hnot = -np.dot(self.prices*self.notionals, self.durations)/(np.sum(self.prices*self.durations*is_hedge))
-            self.current_hedge = {hedge_instrument[0]: hnot}
-        except:
+        if np.sum(self.prices*self.durations*is_hedge) == 0:
             self.current_hedge = {}
+        else:
+            try:
+                hedge_instrument = [self.isins[i] for i in range(len(self.isins)) if is_hedge[i]==True]
+                if len(hedge_instrument) > 1:
+                    AppLogger.print(f"More than one hedge instrument selected, defaulting to {hedge_instrument}")
+                    is_hedge = [1  if isin == hedge_instrument[0] else 0 for isin in self.isins ]
+
+                hnot = -np.dot(self.prices*self.notionals, self.durations)/(np.sum(self.prices*self.durations*is_hedge))
+                self.current_hedge = {hedge_instrument[0]: hnot}
+            except:
+                self.current_hedge = {}
         self.hedge_notionals = np.array([self.current_hedge.get(isin, 0) for isin in self.isins])
 
     def quadratic_hedge(self):
@@ -905,6 +946,37 @@ class Window(QMainWindow):
                                   hedge_instrument[2]: x[2]}
 
         self.hedge_notionals = np.array([self.current_hedge.get(isin, 0) for isin in self.isins])
+
+    def variance_minimization_hedge(self):
+        hedge_indexes = np.where(self.is_hedge==1)[0]
+        hedge_instrument = [self.isins[i] for i in range(len(self.isins)) if self.is_hedge[i] == True]
+
+        def variance_minimization_func(args):
+            notionals = self.notionals.copy()
+            for i, idx in enumerate(hedge_indexes):
+                notionals[idx] = args[i]
+            pf_var = self.compute_portfolio_variance(notionals)
+            return pf_var
+
+        minimization = minimize(variance_minimization_func, x0=[0 for _ in hedge_indexes], tol=1E-8, method='CG')
+        print(minimization.message)
+        self.current_hedge = {hedge_instrument[i]: minimization.x[i] for i in range(len(hedge_instrument))}
+        self.hedge_notionals = np.array([self.current_hedge.get(isin, 0) for isin in self.isins])
+
+    def compute_portfolio_variance(self, notionals=None):
+        if notionals is None:
+            notionals = self.notionals + self.hedge_notionals
+
+        vola = np.diag(self.volatilities)
+        corr = self.price_series.corr().values
+        covariance = np.matmul(np.matmul(vola, corr), vola)
+
+        instrument_values = notionals * self.prices * 100
+        net_value = np.sum(np.abs(notionals) * self.prices * 100)
+        weights = instrument_values / net_value
+
+        portfolio_variance = np.dot(np.dot(weights, covariance), weights)
+        return portfolio_variance
 
     # ------------------------- CHANGE SIGNALS -----------------------------
     def instrument_properties_have_changed(self, property, instrument_param):
