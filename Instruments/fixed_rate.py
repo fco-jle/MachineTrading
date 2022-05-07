@@ -118,7 +118,8 @@ class FixedRateBond:
         return dv01
 
     def accrued_amount(self, eval_date=None):
-        return self.bond.accruedAmount(eval_date)
+        ql_eval_date = self._date_to_quantlib(eval_date)
+        return self.bond.accruedAmount(ql_eval_date)
 
     def duration(self, bond_yield, kind=ql.Duration.Simple):
         return ql.BondFunctions.duration(
@@ -280,6 +281,7 @@ if __name__ == '__main__':
                   (0.95, ql.Date(1, 12, 2031), ql.Date(1, 6, 2021), 91.0),  # IT0005449969  ->  0.643888
                   (0.95, ql.Date(1, 6, 2032), ql.Date(1, 11, 2021), 90.09)  # IT0005466013  ->  0.630012
                   ]
+
         f_price = 137.54
         f_delivery = ql.Date(10, 6, 2022)
 

@@ -1,0 +1,46 @@
+{
+    "CONF": {
+        "URL": "https://www.eurex.com/ex-en/markets/int/fix/government-bonds/CONF-Futures-137442",
+        "Name": "CONF Futures (CONF)"
+    },
+    "FGBM": {
+        "URL": "https://www.eurex.com/ex-en/markets/int/fix/government-bonds/Euro-Bobl-Futures-137276",
+        "Name": "Euro-Bobl Futures (FGBM)"
+    },
+    "FBON": {
+        "URL": "https://www.eurex.com/ex-en/markets/int/fix/government-bonds/Euro-BONO-Futures-137424",
+        "Name": "Euro-BONO Futures (FBON)"
+    },
+    "FGBL": {
+        "URL": "https://www.eurex.com/ex-en/markets/int/fix/government-bonds/Euro-Bund-Futures-137298",
+        "Name": "Euro-Bund Futures (FGBL)"
+    },
+    "FGBX": {
+        "URL": "https://www.eurex.com/ex-en/markets/int/fix/government-bonds/Euro-Buxl-Futures-137324",
+        "Name": "Euro-Buxl\u00ae Futures (FGBX)"
+    },
+    "FOAT": {
+        "URL": "https://www.eurex.com/ex-en/markets/int/fix/government-bonds/Euro-OAT-Futures-137416",
+        "Name": "Euro-OAT Futures (FOAT)"
+    },
+    "FGBS": {
+        "URL": "https://www.eurex.com/ex-en/markets/int/fix/government-bonds/Euro-Schatz-Futures-137256",
+        "Name": "Euro-Schatz Futures (FGBS)"
+    },
+    "FBTP": {
+        "URL": "https://www.eurex.com/ex-en/markets/int/fix/government-bonds/Long-Term-Euro-BTP-Futures-137382",
+        "Name": "Long-Term Euro-BTP Futures (FBTP)"
+    },
+    "FBTM": {
+        "URL": "https://www.eurex.com/ex-en/markets/int/fix/government-bonds/Mid-Term-Euro-BTP-Futures-137350",
+        "Name": "Mid-Term Euro-BTP Futures (FBTM)"
+    },
+    "FOAM": {
+        "URL": "https://www.eurex.com/ex-en/markets/int/fix/government-bonds/Mid-Term-Euro-OAT-Futures-137390",
+        "Name": "Mid-Term Euro-OAT Futures (FOAM)"
+    },
+    "FBTS": {
+        "URL": "https://www.eurex.com/ex-en/markets/int/fix/government-bonds/Short-Term-Euro-BTP-Futures-137336",
+        "Name": "Short-Term Euro-BTP Futures (FBTS)"
+    }
+}
