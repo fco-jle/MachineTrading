@@ -19,11 +19,13 @@ import pyqtgraph as pg
 from pyqtgraph import configfile
 from pyqtgraph.flowchart import Flowchart
 import pyqtgraph.opengl as gl
+from scipy.optimize import curve_fit
 
 from MachineTrading.Utils import io_utils
 from MachineTrading.Instruments.fixed_rate import BTP
 from MachineTrading.AlgoTradingApp.appmain import Ui_MainWindow
 from MachineTrading.TSA.volatility import garman_klass, standard_dev, close_to_close, parkinson, garman_klass_yang_zhang
+from MachineTrading.yield_curve_functions import nelson_siegel
 
 
 def random_color():
@@ -388,7 +390,7 @@ class Window(QMainWindow):
                      limits=["Standard Dev", "Close To Close", "Parkinson", "Garman Klass", "Garman Klass Yang Zhang"],
                      value="Garman Klass"),
                 dict(name='PCA Components', type='int', value=3),
-                dict(name='Yield Curve Date', type='calendar', value=None, expanded=False),
+                dict(name='Date', type='calendar', value=None, expanded=False),
             ]),
             self.objectGroup,
             Parameter.create(name='Hedge Options', type='group', children=[
@@ -409,7 +411,7 @@ class Window(QMainWindow):
 
         self.params.param('Data Params').param('Candles Window').sigValueChanged.connect(self.update_candles)
         self.params.param('Data Params').param('EMA Window').sigValueChanged.connect(self.update_candles)
-        self.params.param('Data Params').param('Yield Curve Date').sigValueChanged.connect(self.params_change_manager)
+        self.params.param('Data Params').param('Date').sigValueChanged.connect(self.params_change_manager)
         self.params.param('Data Params').param('PCA Components').sigValueChanged.connect(self.update_pca_computation)
         self.params.param('Data Params').param('Volatility Type').sigValueChanged.connect(self.update_volatility)
         self.params.param('Hedge Options').param('Hedge Type').sigValueChanged.connect(self.apply_hedge)
@@ -477,7 +479,7 @@ class Window(QMainWindow):
 
     # --------------------- UTILITIES ----------------------------
     def get_selected_date(self):
-        date_param = self.params.param('Data Params').param("Yield Curve Date").value()
+        date_param = self.params.param('Data Params').param("Date").value()
         date = dt.date(date_param.year(), date_param.month(), date_param.day())
         return date
 
@@ -539,6 +541,7 @@ class Window(QMainWindow):
 
             x2 = prc_data['Date'].values.astype(np.int64) // 10 ** 9
             y2 = prc_data['Close'].values
+
             self.yield_plot.plot(x, y, pen=pen)
             self.price_plot.plot(x2, y2, pen=pen)
 
@@ -554,10 +557,16 @@ class Window(QMainWindow):
     def update_maturity_plot(self):
         self.yield_curve_plot.clear()
         self.yield_curve_plot.plot(self.maturities, self.yields * 100, symbol='o', pen=pg.mkPen(color=(206, 241, 229)))
+        try:
+            popt, pcov = curve_fit(nelson_siegel, self.maturities, self.yields)
+            x = np.linspace(np.min(self.maturities), np.max(self.maturities), 100)
+            y = nelson_siegel(x, popt[0], popt[1], popt[2], popt[3])
+            self.yield_curve_plot.plot(x, y * 100, pen=pg.mkPen(color=(255, 0, 0)))
+        except:
+            pass
 
         self.volatility_plot.clear()
         self.volatility_plot.plot(self.maturities, self.volatilities, symbol='o', pen=pg.mkPen(color=(206, 241, 229)))
-
         self.update_pca_plot()
 
     def update_pca_plot(self):
@@ -684,9 +693,13 @@ class Window(QMainWindow):
 
         instrument_values = total_notional * prices * 100
         net_value = np.sum(np.abs(total_notional) * prices * 100)
-        weights = instrument_values / net_value
+
         if net_value == 0:
             net_value = 1E35
+            weights = instrument_values
+        else:
+            weights = instrument_values / net_value
+
 
         # -----------------  DV01  -------------------
         main_pf_dv01 = dv01s * instrument_values * np.invert(is_hedge) * 0.0001
@@ -973,7 +986,11 @@ class Window(QMainWindow):
 
         instrument_values = notionals * self.prices * 100
         net_value = np.sum(np.abs(notionals) * self.prices * 100)
-        weights = instrument_values / net_value
+
+        if net_value != 0:
+            weights = instrument_values / net_value
+        else:
+            weights = instrument_values
 
         portfolio_variance = np.dot(np.dot(weights, covariance), weights)
         return portfolio_variance
