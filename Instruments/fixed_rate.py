@@ -7,14 +7,14 @@ import numpy as np
 class FixedRateBond:
     def __init__(self, issue_date, maturity_date, coupon, settlement_days=2,
                  calendar=None, payment_convention=None, end_of_month=False,
-                 coupon_period=ql.Semiannual):
+                 coupon_period=ql.Semiannual, compounding=ql.Compounded):
 
         self.settlementDays = settlement_days
         face_amount = 100.0
         self.issue_date = self._date_to_quantlib(issue_date)
         self.maturity_date = self._date_to_quantlib(maturity_date)
         self.frequency = coupon_period
-        self.compounding = ql.Compounded
+        self.compounding = compounding
         tenor = ql.Period(self.frequency)
 
         self.calendar = calendar if calendar is not None else ql.NullCalendar()
@@ -68,14 +68,14 @@ class FixedRateBond:
     def bond_yield(self, price, eval_date=None):
         if eval_date:
             self.set_evaluation_date(eval_date)
-        yld = self.bond.bondYield(price, self.pricingDayCounter, self.compounding, ql.Annual)
+        yld = self.bond.bondYield(price, self.pricingDayCounter, self.compounding, self.frequency)
         return yld
 
     def clean_price(self, bond_yield, eval_date=None, errors='raise'):
         if eval_date:
             self.set_evaluation_date(eval_date)
         try:
-            prc = self.bond.cleanPrice(bond_yield, self.pricingDayCounter, self.compounding, ql.Annual)
+            prc = self.bond.cleanPrice(bond_yield, self.pricingDayCounter, self.compounding, self.frequency)
         except RuntimeError:
             if errors == 'coerce':
                 prc = np.nan
@@ -88,23 +88,15 @@ class FixedRateBond:
     def dirty_price(self, bond_yield, eval_date=None):
         if eval_date:
             self.set_evaluation_date(eval_date)
-        prc = self.bond.dirtyPrice(bond_yield, self.pricingDayCounter, self.compounding, ql.Annual)
+        prc = self.bond.dirtyPrice(bond_yield, self.pricingDayCounter, self.compounding, self.frequency)
         return prc
 
     def npv(self, bond_yield, eval_date=None):
         if eval_date:
             self.set_evaluation_date(eval_date)
-        self._set_pricing_engine(bond_yield, day_counter=self.pricingDayCounter, compounding_period=ql.Annual)
+        self._set_pricing_engine(bond_yield, day_counter=self.pricingDayCounter, compounding_period=self.frequency)
         npv = self.bond.NPV()
         return npv
-
-    def dv01(self, bond_yield, bond_price, eval_date=None):
-        if eval_date:
-            self.set_evaluation_date(eval_date)
-        dur = self.duration_modified(bond_yield=bond_yield)
-        delta_i = 0.01
-        dollar_duration = dur * (delta_i / (1+bond_yield)) * bond_price
-        return dollar_duration
 
     def dv01_from_yield(self, bond_yield, eval_date=None):
         p1 = self.clean_price(bond_yield=bond_yield, eval_date=eval_date)
@@ -114,7 +106,7 @@ class FixedRateBond:
 
     def dv01_from_price(self, price, eval_date=None):
         yld = self.bond_yield(price, eval_date)
-        dv01 = p1 - self.clean_price(yld + 0.01/100, eval_date)
+        dv01 = price - self.clean_price(yld + 0.01/100, eval_date)
         return dv01
 
     def accrued_amount(self, eval_date=None):
@@ -150,11 +142,15 @@ class FixedRateBond:
             self.compounding,
             self.frequency)
 
-    def bps(self, bond_yield):
+    def bpv(self, price, eval_date=None):
+        if eval_date:
+            self.set_evaluation_date(eval_date)
+
+        bond_yield = self.bond_yield(price, eval_date)
         return ql.BondFunctions.basisPointValue(
             self.bond,
             bond_yield,
-            self.accrualDayCounter,
+            self.pricingDayCounter,
             self.compounding,
             self.frequency)
 
@@ -183,6 +179,7 @@ class BTP(FixedRateBond):
             settlement_days=2,
             calendar=ql.NullCalendar(),
             payment_convention=ql.ModifiedFollowing,
+            coupon_period=ql.Annual,
             end_of_month=True
         )
 
@@ -203,7 +200,33 @@ class FixedRateBondEurex(FixedRateBond):
 if __name__ == '__main__':
     TEST = 'ComputePrice'
     # TEST = 'ForwardYield'
-    TEST = 'CTD'
+    # TEST = 'CTD'
+    TEST = "Borsa"
+    TEST = "DV01"
+    if TEST == "DV01":
+        coupon, maturity, issue = (0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020))
+        p = 83.55
+        y = 3.04
+        s2 = BTP(issue, maturity, coupon, )
+        test = s2.bond_yield(price=p, eval_date=ql.Date(6, 5, 2022)) * 100  # 3.04
+        modified_duration = s2.duration_modified(y / 100)
+        bpv = -s2.bpv(p, eval_date=ql.Date(6, 5, 2022))*100
+        dv01_2 = s2.dv01_from_price(p, eval_date=ql.Date(6, 5, 2022))*100
+        dv01_from_duration = p*modified_duration/100
+
+    if TEST == "Borsa":
+        coupon, maturity, issue = (0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020))
+
+        p = 83.55
+        y = 3.04
+
+        s2 = BTP(issue, maturity, coupon, )
+        test = s2.bond_yield(price=p, eval_date=ql.Date(6, 5, 2022))*100  # 3.04
+        test2 = s2.clean_price(bond_yield=3.037/100, eval_date=ql.Date(6, 5, 2022))  # 83.55
+        test3 = s2.dirty_price(bond_yield=3.037/100, eval_date=ql.Date(6, 5, 2022))
+        test4 = s2.accrued_amount(eval_date=ql.Date(6, 5, 2022))
+        test5 = s2.npv(bond_yield=test/100, eval_date=ql.Date(6, 5, 2022))
+
 
     if TEST == 'ForwardYield':
         """
@@ -253,8 +276,8 @@ if __name__ == '__main__':
         coupon, maturity, issue = (0.60, ql.Date(1, 8, 2031), ql.Date(23, 2, 2021))
         s2 = BTP(issue, maturity, coupon)
         ttest = s2.bond_yield(price=p, eval_date=ql.Date(1, 4, 2022))  # 2.0
-        ttest2 = s2.clean_price(bond_yield=ttest, eval_date=ql.Date(1, 4, 2022))  # 91.04
-        ttest4 = s2.dirty_price(bond_yield=ttest, eval_date=ql.Date(1, 4, 2022))  # 91.04
+        ttest2 = s2.clean_price(bond_yield=ttest, eval_date=ql.Date(1, 4, 2022))  # 88.01
+        ttest4 = s2.dirty_price(bond_yield=ttest, eval_date=ql.Date(1, 4, 2022))  # 88.41
         ttest3 = s2.npv(bond_yield=ttest, eval_date=ql.Date(1, 4, 2022))
 
         print("%-15s = %1.3f" % ("Expected Yield", y * 100))
