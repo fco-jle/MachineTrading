@@ -75,7 +75,7 @@ class FixedRateBond:
         if eval_date:
             self.set_evaluation_date(eval_date)
         try:
-            prc = self.bond.cleanPrice(bond_yield, self.pricingDayCounter, self.compounding, self.frequency)
+            prc = self.bond.cleanPrice(bond_yield, self.pricingDayCounter, self.compounding, ql.Annual)
         except RuntimeError:
             if errors == 'coerce':
                 prc = np.nan
@@ -161,7 +161,7 @@ class FixedRateBond:
 
     def futures_contract_conversion_factor(self, bond_price, futures_price, futures_delivery_date, futures_coupon=0.06):
         """
-        The Conversion Factor for a cash Treasury security is the price of that security that would makes
+        The Conversion Factor for a cash Treasury security is the price of that security that would make
         its yield to the futures delivery date equal to its coupon rate.
         """
         cf = self.clean_price(bond_yield=futures_coupon, eval_date=futures_delivery_date) / 100
@@ -179,13 +179,13 @@ class BTP(FixedRateBond):
             settlement_days=2,
             calendar=ql.NullCalendar(),
             payment_convention=ql.ModifiedFollowing,
-            coupon_period=ql.Annual,
+            coupon_period=ql.Semiannual,
             end_of_month=True
         )
 
 
 class FixedRateBondEurex(FixedRateBond):
-    def __init__(self, issue_date, maturity_date, coupon):
+    def __init__(self, issue_date, maturity_date, coupon=0.06):
         super(FixedRateBondEurex, self).__init__(
             issue_date=issue_date,
             maturity_date=maturity_date,
@@ -196,13 +196,32 @@ class FixedRateBondEurex(FixedRateBond):
             end_of_month=False
         )
 
+    def clean_price(self, bond_yield, eval_date=None):
+        if eval_date:
+            self.set_evaluation_date(eval_date)
+        prc = self.bond.cleanPrice(bond_yield, self.pricingDayCounter, ql.Compounded, ql.Annual)
+        return prc
+
 
 if __name__ == '__main__':
-    TEST = 'ComputePrice'
+    # TEST = 'ComputePrice'
     # TEST = 'ForwardYield'
     # TEST = 'CTD'
-    TEST = "Borsa"
-    TEST = "DV01"
+    # TEST = "Borsa"
+    TEST = "BPV"
+    # TEST = "DV01"
+
+    if TEST == "BPV":
+        coupon, maturity, issue = (2.50, ql.Date(1, 12, 2024), ql.Date(1, 9, 2014))
+        p = 103.573
+        dv01 = 2.546
+        s2 = BTP(issue, maturity, coupon)
+        s2.cash_flows()  # 0.623288
+        yld = s2.bond_yield(price=p, eval_date=ql.Date(12, 5, 2022)) * 100  #
+        modified_duration = s2.duration_modified(yld / 100)
+        simple_duration = s2.duration_simple(yld / 100)
+        bpv = -s2.bpv(p, eval_date=ql.Date(12, 5, 2022)) * 100
+
     if TEST == "DV01":
         coupon, maturity, issue = (0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020))
         p = 83.55
@@ -210,23 +229,31 @@ if __name__ == '__main__':
         s2 = BTP(issue, maturity, coupon, )
         test = s2.bond_yield(price=p, eval_date=ql.Date(6, 5, 2022)) * 100  # 3.04
         modified_duration = s2.duration_modified(y / 100)
+        simple_duration = s2.duration_simple(y/100)
         bpv = -s2.bpv(p, eval_date=ql.Date(6, 5, 2022))*100
         dv01_2 = s2.dv01_from_price(p, eval_date=ql.Date(6, 5, 2022))*100
         dv01_from_duration = p*modified_duration/100
+        dv01_from_duration_simple = p * simple_duration / 100
+
+        p1 = s2.clean_price(3.04/100)
+        p2 = s2.clean_price(3.04 / 100 + 0.1/100)
+        p0 = s2.clean_price(3.04 / 100 - 0.1 / 100)
+
+        diff1 = (p1 - p2) / 0.1
+        diff2 = (p0 - p1) / 0.1
+        diff = (diff1+diff2)/2
+
 
     if TEST == "Borsa":
         coupon, maturity, issue = (0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020))
-
         p = 83.55
         y = 3.04
-
         s2 = BTP(issue, maturity, coupon, )
         test = s2.bond_yield(price=p, eval_date=ql.Date(6, 5, 2022))*100  # 3.04
         test2 = s2.clean_price(bond_yield=3.037/100, eval_date=ql.Date(6, 5, 2022))  # 83.55
         test3 = s2.dirty_price(bond_yield=3.037/100, eval_date=ql.Date(6, 5, 2022))
         test4 = s2.accrued_amount(eval_date=ql.Date(6, 5, 2022))
         test5 = s2.npv(bond_yield=test/100, eval_date=ql.Date(6, 5, 2022))
-
 
     if TEST == 'ForwardYield':
         """
@@ -326,6 +353,7 @@ if __name__ == '__main__':
 
         print("%-30s = %lf" % ("Minimum Basis", min_basis))
         print("%-30s = %lf" % ("Conversion Factor", ctd_cf))
+        print("%-30s = %lf" % ("Expected Conversion Factor", 0.659620))
         print("%-30s = %lf" % ("Coupon", ctd_info[0]))
         print("%-30s = %s" % ("Maturity", ctd_info[1]))
         print("%-30s = %lf" % ("Price", ctd_info[3]))

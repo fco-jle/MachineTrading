@@ -87,12 +87,14 @@ class AppBond:
     def reset_price_data(self):
         selt._price_data = self._price_data_backup.copy()
 
-    def update_data(self, date):
+    def update_data(self, date, log=False):
         if date == self.current_data_date:
-            AppLogger.print(f"Calling - update_data for isin {self.instrument_id} - Data is up to date - Skipping")
+            if log:
+                AppLogger.print(f"Calling - update_data for isin {self.instrument_id} - Data is up to date - Skipping")
             return
 
-        AppLogger.print(f"Calling - update_data for isin {self.instrument_id}")
+        if log:
+            AppLogger.print(f"Calling - update_data for isin {self.instrument_id}")
         max_date_available = self.get_current_price_data()['Date'].iloc[-1].date()
         if date > max_date_available:
             print(f"Selected date not available, defaulting to max date in data: {max_date_available}")
@@ -102,7 +104,7 @@ class AppBond:
         self.yld = self.get_current_yield_data().set_index('Date').loc[str(date)]['Close']
         self.convexity = self.bond.convexity(bond_yield=self.yld)
         self.duration = self.bond.duration_modified(bond_yield=self.yld)
-        self.dv01 = self.bond.dv01(bond_yield=self.yld, bond_price=self.price, eval_date=date)
+        self.dv01 = -self.bond.bpv(price=self.price, eval_date=date)*100
         self.years_to_maturity = self.bond.years_to_maturity(eval_date=date)
         self.current_data_date = date
 
@@ -701,7 +703,7 @@ class Window(QMainWindow):
             weights = instrument_values / net_value
 
 
-        # -----------------  DV01  -------------------
+        # -----------------  Dollar Duration  -------------------
         main_pf_dv01 = dv01s * instrument_values * np.invert(is_hedge) * 0.0001
         hedge_pf_dv01 = dv01s * instrument_values * is_hedge * 0.0001
         total_pf_dv01 = dv01s * instrument_values * 0.0001
@@ -710,6 +712,11 @@ class Window(QMainWindow):
         main_pf_duration =  durations * weights * np.invert(is_hedge)
         hedge_pf_duration = durations * weights * is_hedge
         total_pf_duration = durations * weights
+
+        # -----------------  Dollar Convexity  -------------------
+        main_pf_convexityd = convexities * weights * prices * np.invert(is_hedge)
+        hedge_pf_convexityd = convexities * weights * prices * is_hedge
+        total_pf_convexityd = convexities * weights * prices
 
         # -----------------  Convexity  -------------------
         main_pf_convexity = convexities  * weights * np.invert(is_hedge)
@@ -731,8 +738,8 @@ class Window(QMainWindow):
             self.duration_plot.addItem(bargraph_dur_1)
             self.duration_plot.addItem(bargraph_dur_2)
 
-            bargraph_conv_1 = pg.BarGraphItem(x=self.maturities, height=main_pf_convexity, width=0.2, brush='#43bce8')
-            bargraph_conv_2 = pg.BarGraphItem(x=self.maturities, height=hedge_pf_convexity, width=0.2, brush='#d6564d')
+            bargraph_conv_1 = pg.BarGraphItem(x=self.maturities, height=main_pf_convexityd, width=0.2, brush='#43bce8')
+            bargraph_conv_2 = pg.BarGraphItem(x=self.maturities, height=hedge_pf_convexityd, width=0.2, brush='#d6564d')
             self.convexity_plot.addItem(bargraph_conv_1)
             self.convexity_plot.addItem(bargraph_conv_2)
 
@@ -751,7 +758,7 @@ class Window(QMainWindow):
         # Plot
         self.dv01_plot.setTitle(f"<font size='5'> DV01 : {round(np.sum(total_pf_dv01), 2)}</font>")
         self.duration_plot.setTitle(f"<font size='5'> Duration : {str(round(np.sum(total_pf_duration), 2))} </font>")
-        self.convexity_plot.setTitle(f"<font size='5'> Convexity : {str(round(np.sum(total_pf_convexity), 2))}</font>")
+        self.convexity_plot.setTitle(f"<font size='5'> Convexity : {str(round(np.sum(total_pf_convexityd), 2))}</font>")
 
         # Build The Table:
         data = []
@@ -846,7 +853,7 @@ class Window(QMainWindow):
                     AppLogger.print(f"More than one hedge instrument selected, defaulting to {hedge_instrument}")
                     is_hedge = [1  if isin == hedge_instrument[0] else 0 for isin in self.isins ]
 
-                hnot = -np.dot(self.prices*self.notionals, self.durations)/(np.sum(self.prices*self.durations*is_hedge))
+                hnot = -np.dot(self.prices * self.notionals, self.dv01s) / (np.sum(self.prices * self.dv01s * is_hedge))
                 self.current_hedge = {hedge_instrument[0]: hnot}
             except:
                 self.current_hedge = {}
@@ -919,11 +926,11 @@ class Window(QMainWindow):
             is_hedge = [1 if isin in hedge_instrument else 0 for isin in self.isins]
 
             a = np.array([
-                [self.prices[idx[0]]*self.durations[idx[0]], self.prices[idx[1]]*self.durations[idx[1]]],
-                [self.prices[idx[0]]*self.convexities[idx[0]], self.prices[idx[1]]*self.convexities[idx[1]]]
+                [self.prices[idx[0]]*self.dv01s[idx[0]], self.prices[idx[1]]*self.dv01s[idx[1]]],
+                [self.prices[idx[0]]*self.convexities[idx[0]]*self.prices[idx[0]], self.prices[idx[1]]*self.convexities[idx[1]]*self.prices[idx[1]]]
             ])
-            b = np.array([-np.dot(self.prices*self.notionals, self.durations),
-                          -np.dot(self.prices*self.notionals, self.convexities)
+            b = np.array([-np.dot(self.prices*self.notionals, self.dv01s),
+                          -np.dot(self.prices*self.notionals, self.prices*self.convexities)
                           ])
             x = np.linalg.solve(a, b)
 
