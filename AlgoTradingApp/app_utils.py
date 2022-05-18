@@ -1,7 +1,6 @@
 import datetime as dt
-import pandas as pd
 from Utils import io_utils
-from Instruments.fixed_rate import FixedRateBond
+from instruments.bonds import FixedRateBond
 
 
 def build_bond(isin):

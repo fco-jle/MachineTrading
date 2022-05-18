@@ -22,9 +22,9 @@ import pyqtgraph.opengl as gl
 from scipy.optimize import curve_fit
 
 from MachineTrading.Utils import io_utils
-from MachineTrading.Instruments.fixed_rate import BTP
+from MachineTrading.instruments.bonds import BTP
 from MachineTrading.AlgoTradingApp.appmain import Ui_MainWindow
-from MachineTrading.TSA.volatility import garman_klass, standard_dev, close_to_close, parkinson, garman_klass_yang_zhang
+from MachineTrading.time_series_analysis.volatility import garman_klass, standard_dev, close_to_close, parkinson, garman_klass_yang_zhang
 from MachineTrading.yield_curve_functions import nelson_siegel
 
 
@@ -42,6 +42,7 @@ class AppBond:
         maturity = dt.datetime.strptime(bond_info["MaturityDate"], '%Y-%m-%d')
         issue = dt.datetime.strptime(bond_info["IssueDate"], '%Y-%m-%d')
         coupon = bond_info["CouponInterest"]
+        self.coupon = coupon
         self.instrument_id = isin
         self.bond = BTP(issue_date=issue, maturity_date=maturity, coupon=coupon)
 
@@ -146,7 +147,7 @@ class InstrumentParam(ptypes.GroupParameter):
 
 class InstrumentsGroupParam(ptypes.GroupParameter):
     def __init__(self):
-        ptypes.GroupParameter.__init__(self, name="Instruments", addText="Add New..", addList=[])
+        ptypes.GroupParameter.__init__(self, name="instruments", addText="Add New..", addList=[])
         self.set_options()
 
     def set_options(self):
@@ -312,9 +313,9 @@ class Window(QMainWindow):
         self.price_plot.setXLink(self.yield_plot)
         self.yield_plot.showGrid(x=False, y=True)
         self.price_plot.showGrid(x=False, y=True)
-        self.yield_plot.setTitle("<font size='5'> Selected Instruments Yield</font>")
+        self.yield_plot.setTitle("<font size='5'> Selected instruments Yield</font>")
         self.yield_plot.setLabels(left="<font size='4'>Yield (%)</font>", bottom="<font size='4'>Datetime</font>")
-        self.price_plot.setTitle("<font size='5'> Selected Instruments Price</font>")
+        self.price_plot.setTitle("<font size='5'> Selected instruments Price</font>")
         self.price_plot.setLabels(left="<font size='4'>Price</font>", bottom="<font size='4'>Datetime</font>")
 
         # Config Right Part of Splitter
@@ -408,8 +409,8 @@ class Window(QMainWindow):
         self.params.param('Load').sigActivated.connect(self.load)
         self.params.param('Load Preset').sigValueChanged.connect(self.load_preset)
 
-        self.params.param('Instruments').sigChildAdded.connect(self.instrument_add)
-        self.params.param('Instruments').sigChildRemoved.connect(self.instrument_delete)
+        self.params.param('instruments').sigChildAdded.connect(self.instrument_add)
+        self.params.param('instruments').sigChildRemoved.connect(self.instrument_delete)
 
         self.params.param('Data Params').param('Candles Window').sigValueChanged.connect(self.update_candles)
         self.params.param('Data Params').param('EMA Window').sigValueChanged.connect(self.update_candles)
@@ -433,7 +434,7 @@ class Window(QMainWindow):
 
         # Link Instrument Parameters to hedging function:
         for param in ['Notional', 'HedgeInstrument']:
-            self.params.param('Instruments').param(id).param(param).sigValueChanged.connect(self.apply_hedge)
+            self.params.param('instruments').param(id).param(param).sigValueChanged.connect(self.apply_hedge)
 
         # If a new instrument is added, everything needs to be updated:
         self.params_change_manager()
@@ -476,7 +477,7 @@ class Window(QMainWindow):
         if 'Load Preset..' in state['children']:
             del state['children']['Load Preset..']['limits']
             del state['children']['Load Preset..']['value']
-        self.params.param('Instruments').clearChildren()
+        self.params.param('instruments').clearChildren()
         self.params.restoreState(state, removeChildren=False)
 
     # --------------------- UTILITIES ----------------------------
@@ -518,7 +519,7 @@ class Window(QMainWindow):
         self.price_plot.clear()
         for isin in self.instruments.keys():
             try:
-                isin_params = self.params.param('Instruments').param(isin)
+                isin_params = self.params.param('instruments').param(isin)
             except KeyError:
                 continue
 
@@ -594,7 +595,7 @@ class Window(QMainWindow):
     def update_all_instruments_single_property(self, property_name, property_item, to_array=True):
         prop_list = []
         for i, isin in enumerate(self.instruments.keys()):
-            isin_params = self.params.param('Instruments').param(isin)
+            isin_params = self.params.param('instruments').param(isin)
             prop_list.append(isin_params[property_name])
         prop_list = [prop_list[i] for i in self.sorted_indexes]
         if to_array:
@@ -625,7 +626,7 @@ class Window(QMainWindow):
             app_bond = self.instruments[isin]
             assert isinstance(app_bond, AppBond)
             try:
-                isin_params = self.params.param('Instruments').param(isin)
+                isin_params = self.params.param('instruments').param(isin)
             except KeyError:
                 continue
 
@@ -704,9 +705,9 @@ class Window(QMainWindow):
 
 
         # -----------------  Dollar Duration  -------------------
-        main_pf_dv01 = dv01s * instrument_values * np.invert(is_hedge) * 0.0001
-        hedge_pf_dv01 = dv01s * instrument_values * is_hedge * 0.0001
-        total_pf_dv01 = dv01s * instrument_values * 0.0001
+        main_pf_dv01 = dv01s * total_notional * np.invert(is_hedge)
+        hedge_pf_dv01 = dv01s * total_notional * is_hedge
+        total_pf_dv01 = dv01s * total_notional
 
         # -----------------  Duration  -------------------
         main_pf_duration =  durations * weights * np.invert(is_hedge)
@@ -765,7 +766,7 @@ class Window(QMainWindow):
         for i in range(len(isins)):
             data.append((isins[i],
                          dv01s[i],
-                         total_pf_dv01[i],
+                         prices[i],
                          durations[i],
                          total_pf_duration[i],
                          convexities[i],
@@ -844,7 +845,7 @@ class Window(QMainWindow):
 
     def duration_hedge(self):
         is_hedge = self.is_hedge
-        if np.sum(self.prices*self.durations*is_hedge) == 0:
+        if np.sum(self.notionals*self.dv01s) == 0:
             self.current_hedge = {}
         else:
             try:
@@ -853,7 +854,7 @@ class Window(QMainWindow):
                     AppLogger.print(f"More than one hedge instrument selected, defaulting to {hedge_instrument}")
                     is_hedge = [1  if isin == hedge_instrument[0] else 0 for isin in self.isins ]
 
-                hnot = -np.dot(self.prices * self.notionals, self.dv01s) / (np.sum(self.prices * self.dv01s * is_hedge))
+                hnot = -np.dot(self.notionals, self.dv01s) / (np.sum(self.dv01s * is_hedge))
                 self.current_hedge = {hedge_instrument[0]: hnot}
             except:
                 self.current_hedge = {}
@@ -1009,7 +1010,7 @@ class Window(QMainWindow):
             app_bond = self.instruments[isin]
             assert isinstance(app_bond, AppBond)
             try:
-                isin_params = self.params.param('Instruments').param(isin)
+                isin_params = self.params.param('instruments').param(isin)
             except KeyError:
                 continue
 

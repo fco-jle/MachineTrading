@@ -46,22 +46,21 @@ def compute_pnl(quantities, exec_prices, contract_notional=100000, tick_value=10
     return pnls
 
 
-if __name__ == '__main__':
-    from prettytable import PrettyTable
-
-    x = PrettyTable()
-    quantities = np.array([1, 1, -2, -10, -10, 10, -20, 30])
-    exec_prices = np.array([100.0, 101.0, 100.60, 100.78, 100.49, 101.4, 101.24, 101.1])
-    pnls = []
-    print('Pos\t|\tR.P&L\t|\tU P&L\t|\tAvgPrc')
-    print('-' * 55)
-    pos = PnLCalculator(contract_notional=100000, tick_value=10)
-    x.field_names = ["Quantity", "Realized", "Unrealized", "AveragePrice", "Total P&L"]
-    pnls = []
-    for (p, e) in zip(quantities, exec_prices):
-        pos.fill(p, e)
-        u_pnl = pos.update(e)
-        pnls.append(u_pnl + pos.r_pnl)
-        x.add_row([pos.quantity, round(pos.r_pnl), round(u_pnl), pos.average_price, round(pos.r_pnl+u_pnl)])
-
-    print(x)
+# if __name__ == '__main__':
+#     from prettytable import PrettyTable
+#
+#     x = PrettyTable()
+#     quantities = np.array([1, 1, -2, -10, -10, 10, -20, 30])
+#     exec_prices = np.array([100.0, 101.0, 100.60, 100.78, 100.49, 101.4, 101.24, 101.1])
+#     print('Pos\t|\tR.P&L\t|\tU P&L\t|\tAvgPrc')
+#     print('-' * 55)
+#     pos = PnLCalculator(contract_notional=100000, tick_value=10)
+#     x.field_names = ["Quantity", "Realized", "Unrealized", "AveragePrice", "Total P&L"]
+#     pnls = []
+#     for (p, e) in zip(quantities, exec_prices):
+#         pos.fill(p, e)
+#         u_pnl = pos.update(e)
+#         pnls.append(u_pnl + pos.r_pnl)
+#         x.add_row([pos.quantity, round(pos.r_pnl), round(u_pnl), pos.average_price, round(pos.r_pnl+u_pnl)])
+#
+#     print(x)
