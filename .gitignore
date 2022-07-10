@@ -74,7 +74,7 @@ docs/_build/
 # PyBuilder
 target/
 
-# Jupyter Notebook
+# jupyter Notebook
 .ipynb_checkpoints
 
 # IPython
@@ -129,3 +129,8 @@ dmypy.json
 .pyre/
 
 .idea/
+
+bin/
+.dll
+.csv
+.json

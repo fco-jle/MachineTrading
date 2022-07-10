@@ -1,0 +1,12 @@
+D:\PycharmProjects\Coding\RandomStuff\QuantlibBond\bin\Debug\net6.0\QuantlibBond.deps.json
+D:\PycharmProjects\Coding\RandomStuff\QuantlibBond\bin\Debug\net6.0\QuantlibBond.dll
+D:\PycharmProjects\Coding\RandomStuff\QuantlibBond\bin\Debug\net6.0\QuantlibBond.pdb
+D:\PycharmProjects\Coding\RandomStuff\QuantlibBond\obj\Debug\net6.0\QuantlibBond.csproj.AssemblyReference.cache
+D:\PycharmProjects\Coding\RandomStuff\QuantlibBond\obj\Debug\net6.0\QuantlibBond.GeneratedMSBuildEditorConfig.editorconfig
+D:\PycharmProjects\Coding\RandomStuff\QuantlibBond\obj\Debug\net6.0\QuantlibBond.AssemblyInfoInputs.cache
+D:\PycharmProjects\Coding\RandomStuff\QuantlibBond\obj\Debug\net6.0\QuantlibBond.AssemblyInfo.cs
+D:\PycharmProjects\Coding\RandomStuff\QuantlibBond\obj\Debug\net6.0\QuantlibBond.csproj.CoreCompileInputs.cache
+D:\PycharmProjects\Coding\RandomStuff\QuantlibBond\obj\Debug\net6.0\QuantlibBond.dll
+D:\PycharmProjects\Coding\RandomStuff\QuantlibBond\obj\Debug\net6.0\refint\QuantlibBond.dll
+D:\PycharmProjects\Coding\RandomStuff\QuantlibBond\obj\Debug\net6.0\QuantlibBond.pdb
+D:\PycharmProjects\Coding\RandomStuff\QuantlibBond\obj\Debug\net6.0\ref\QuantlibBond.dll

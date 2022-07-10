@@ -220,180 +220,168 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
     import numpy as np
 
-    data = np.array([(1, -0.0025601499164019693),
-    (2, 0.0018332455746545235),
-    (3, 0.00621125518348248),
-    (4, 0.009916241654085355),
-    (5, 0.012874663065435415),
-    (6, 0.015193084354751737),
-    (7, 0.01700945126492408),
-    (8, 0.018445317659186136),
-    (9, 0.019595674309261086),
-    (10, 0.02053121247341985),
-    (11, 0.021303562691578185),
-    (12, 0.02195031156427674),
-    (13, 0.022498970430518184),
-    (14, 0.022969884959414984),
-    (15, 0.023378297063901956),
-    (16, 0.02373578642536191),
-    (17, 0.024051276118881776),
-    (18, 0.024331737425672566),
-    (19, 0.024582688180129954),
-    (20, 0.024808549108803958)])
-
-    plt.plot(data[:,0], data[:,1]*100)
-    plt.show()
+    # TEST = 'ComputePrice'
+    # TEST = 'ForwardYield'
+    # TEST = 'CTD'
+    # TEST = "Borsa"
+    # TEST = "BPV"
+    # TEST = "DV01"
+    TEST = "BondYield"
 
 
-#     # TEST = 'ComputePrice'
-#     # TEST = 'ForwardYield'
-#     # TEST = 'CTD'
-#     # TEST = "Borsa"
-#     TEST = "BPV"
-#     # TEST = "DV01"
-#
-#     if TEST == "BPV":
-#         coupon, maturity, issue = (2.50, ql.Date(1, 12, 2024), ql.Date(1, 9, 2014))
-#         p = 103.573
-#         dv01 = 2.546
-#         s2 = BTP(issue, maturity, coupon)
-#         s2.cash_flows()  # 0.623288
-#         yld = s2.bond_yield(price=p, eval_date=ql.Date(12, 5, 2022)) * 100  #
-#         modified_duration = s2.duration_modified(yld / 100)
-#         simple_duration = s2.duration_simple(yld / 100)
-#         bpv = -s2.bpv(p, eval_date=ql.Date(12, 5, 2022)) * 100
-#
-#     if TEST == "DV01":
-#         coupon, maturity, issue = (0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020))
-#         p = 83.55
-#         y = 3.04
-#         s2 = BTP(issue, maturity, coupon, )
-#         test = s2.bond_yield(price=p, eval_date=ql.Date(6, 5, 2022)) * 100  # 3.04
-#         modified_duration = s2.duration_modified(y / 100)
-#         simple_duration = s2.duration_simple(y/100)
-#         bpv = -s2.bpv(p, eval_date=ql.Date(6, 5, 2022))*100
-#         dv01_2 = s2.dv01_from_price(p, eval_date=ql.Date(6, 5, 2022))*100
-#         dv01_from_duration = p*modified_duration/100
-#         dv01_from_duration_simple = p * simple_duration / 100
-#
-#         p1 = s2.clean_price(3.04/100)
-#         p2 = s2.clean_price(3.04 / 100 + 0.1/100)
-#         p0 = s2.clean_price(3.04 / 100 - 0.1 / 100)
-#
-#         diff1 = (p1 - p2) / 0.1
-#         diff2 = (p0 - p1) / 0.1
-#         diff = (diff1+diff2)/2
-#
-#     if TEST == "Borsa":
-#         coupon, maturity, issue = (0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020))
-#         p = 83.55
-#         y = 3.04
-#         s2 = BTP(issue, maturity, coupon, )
-#         test = s2.bond_yield(price=p, eval_date=ql.Date(6, 5, 2022))*100  # 3.04
-#         test2 = s2.clean_price(bond_yield=3.037/100, eval_date=ql.Date(6, 5, 2022))  # 83.55
-#         test3 = s2.dirty_price(bond_yield=3.037/100, eval_date=ql.Date(6, 5, 2022))
-#         test4 = s2.accrued_amount(eval_date=ql.Date(6, 5, 2022))
-#         test5 = s2.npv(bond_yield=test/100, eval_date=ql.Date(6, 5, 2022))
-#
-#     if TEST == 'ForwardYield':
-#         """
-#         The Yield for a futures contract is calculated as the yield to maturity of a cash security with the following
-#         specifications:
-#         - Settlement Date = last delivery day for the futures contract
-#         - Maturity Date = maturity date of the CTD cash security
-#         - Coupon Rate = coupon rate per annum of the CTD cash security
-#         - Bond Price = (futures price * conversion factor for CTD cash security) + (accrued Coupon interest on CTD
-#                                                                                     cash security, from latest Coupon
-#                                                                                     payment date to Settlement Date)
-#         - Coupon Frequency = (Coupon Rate / 2) paid semiannually
-#         - Day Count Basis = (actual / actual)
-#         - Par Value = 100
-#         """
-#
-#         coupon, maturity, issue, price = (0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020), 90.81)
-#         f_price = 137.54
-#         f_delivery = ql.Date(10, 6, 2022)
-#         settle = f_delivery
-#
-#         s = FixedRateBondEurex(issue, maturity, coupon)
-#         cf, basis = s.futures_contract_conversion_factor(price, f_price, f_delivery, 0.06)
-#         expected_bond_price = (f_price * cf) + s.accrued_amount(f_delivery)
-#         fwd_yld = s.bond_yield(price=expected_bond_price, eval_date=settle)
-#         print("%-15s = %lf" % ("Forward Price", f_price))
-#         print("%-15s = %lf" % ("Forward Yield", fwd_yld*100))
-#
-#     if TEST == 'ComputePrice':
-#         coupon, maturity, issue = (0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020))
-#         s2 = BTP(issue, maturity, coupon)
-#         test = s2.bond_yield(price=91.04, eval_date=ql.Date(1, 4, 2022))  # 2.0
-#         test2 = s2.clean_price(bond_yield=test, eval_date=ql.Date(1, 4, 2022))  # 91.04
-#         test4 = s2.dirty_price(bond_yield=test, eval_date=ql.Date(1, 4, 2022))  # 91.04
-#         test3 = s2.npv(bond_yield=test, eval_date=ql.Date(1, 4, 2022))
-#
-#         print("%-15s = %1.3f" % ("Expected Yield", 2.0))
-#         print("%-15s = %1.3f" % ("Bond Yield", round(test * 100, 2)))
-#         print("%-15s = %1.3f" % ("Expected Price", 91.04))
-#         print("%-15s = %1.3f" % ("Clean Price", test2))
-#         print("%-15s = %1.3f" % ("Dirty Price", test4))
-#         print("%-15s = %1.3f" % ("NPV", test3))
-#         print("")
-#
-#         p = 88.01
-#         y = 0.0203
-#         coupon, maturity, issue = (0.60, ql.Date(1, 8, 2031), ql.Date(23, 2, 2021))
-#         s2 = BTP(issue, maturity, coupon)
-#         ttest = s2.bond_yield(price=p, eval_date=ql.Date(1, 4, 2022))  # 2.0
-#         ttest2 = s2.clean_price(bond_yield=ttest, eval_date=ql.Date(1, 4, 2022))  # 88.01
-#         ttest4 = s2.dirty_price(bond_yield=ttest, eval_date=ql.Date(1, 4, 2022))  # 88.41
-#         ttest3 = s2.npv(bond_yield=ttest, eval_date=ql.Date(1, 4, 2022))
-#
-#         print("%-15s = %1.3f" % ("Expected Yield", y * 100))
-#         print("%-15s = %1.3f" % ("Bond Yield", round(ttest * 100, 2)))
-#         print("%-15s = %1.3f" % ("Expected Price", p))
-#         print("%-15s = %1.3f" % ("Clean Price", ttest2))
-#         print("%-15s = %1.3f" % ("Dirty Price", ttest4))
-#         print("%-15s = %1.3f" % ("NPV", ttest3))
-#         print("")
-#
-#     if TEST == 'CTD':
-#         """
-#         The holder of a short position in a Treasury futures contract must deliver a cash Treasury security to the
-#         holder of the offsetting long futures position upon contract expiration.  There are typically several cash
-#         securities available that fulfill the specification of the futures contract.  Because of accrued interest,
-#         differing maturities, etc. of the various cash securities, there are differing cash flows associated with
-#         the deliver process.  The cash security with the lowest cash flow cost is known as the Cheapest to Deliver.
-#         """
-#
-#         # A día 2022-04-01
-#         date = ql.Date(1, 4, 2022)
-#         basket = [(0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020), 90.81),  # IT0005422891  ->  0.659620
-#                   (0.60, ql.Date(1, 8, 2031), ql.Date(23, 2, 2021), 88.5),  # IT0005436693  ->  0.628867
-#                   (0.95, ql.Date(1, 12, 2031), ql.Date(1, 6, 2021), 91.0),  # IT0005449969  ->  0.643888
-#                   (0.95, ql.Date(1, 6, 2032), ql.Date(1, 11, 2021), 90.09)  # IT0005466013  ->  0.630012
-#                   ]
-#
-#         f_price = 137.54
-#         f_delivery = ql.Date(10, 6, 2022)
-#
-#         securities = []
-#         min_basis = 100
-#         min_basis_index = -1
-#         for i, b in enumerate(basket):
-#             coupon, maturity, issue, price = b
-#             s = FixedRateBondEurex(issue, maturity, coupon)
-#             cf, basis = s.futures_contract_conversion_factor(price, f_price, f_delivery)
-#             if basis < min_basis:
-#                 min_basis = basis
-#                 min_basis_index = i
-#             securities.append((s, cf))
-#
-#         ctd_info = basket[min_basis_index]
-#         ctd_bond, ctd_cf = securities[min_basis_index]
-#         ctd_price = ctd_info[3]
-#
-#         print("%-30s = %lf" % ("Minimum Basis", min_basis))
-#         print("%-30s = %lf" % ("Conversion Factor", ctd_cf))
-#         print("%-30s = %lf" % ("Expected Conversion Factor", 0.659620))
-#         print("%-30s = %lf" % ("Coupon", ctd_info[0]))
-#         print("%-30s = %s" % ("Maturity", ctd_info[1]))
-#         print("%-30s = %lf" % ("Price", ctd_info[3]))
+    if TEST == "BondYield":
+        coupon, issue, maturity  = (0.9, ql.Date(1, 10, 2020), ql.Date(1, 4, 2031))
+
+        p = 83.11
+        expected_yield = 3.15
+        bond = BTP(issue, maturity, coupon)
+        computed_yield = bond.bond_yield(p, dt.date(2022,7,8))
+        print(f"Expected: {expected_yield}")
+        print(f"Computed: {computed_yield}")
+        print("Finished")
+
+    if TEST == "BPV":
+        coupon, maturity, issue = (2.50, ql.Date(1, 12, 2024), ql.Date(1, 9, 2014))
+        p = 103.573
+        dv01 = 2.546
+        s2 = BTP(issue, maturity, coupon)
+        s2.cash_flows()  # 0.623288
+        yld = s2.bond_yield(price=p, eval_date=ql.Date(12, 5, 2022)) * 100  #
+        modified_duration = s2.duration_modified(yld / 100)
+        simple_duration = s2.duration_simple(yld / 100)
+        bpv = -s2.bpv(p, eval_date=ql.Date(12, 5, 2022)) * 100
+
+    if TEST == "DV01":
+        coupon, maturity, issue = (0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020))
+        p = 83.55
+        y = 3.04
+        s2 = BTP(issue, maturity, coupon, )
+        test = s2.bond_yield(price=p, eval_date=ql.Date(6, 5, 2022)) * 100  # 3.04
+        modified_duration = s2.duration_modified(y / 100)
+        simple_duration = s2.duration_simple(y/100)
+        bpv = -s2.bpv(p, eval_date=ql.Date(6, 5, 2022))*100
+        dv01_2 = s2.dv01_from_price(p, eval_date=ql.Date(6, 5, 2022))*100
+        dv01_from_duration = p*modified_duration/100
+        dv01_from_duration_simple = p * simple_duration / 100
+
+        p1 = s2.clean_price(3.04/100)
+        p2 = s2.clean_price(3.04 / 100 + 0.1/100)
+        p0 = s2.clean_price(3.04 / 100 - 0.1 / 100)
+
+        diff1 = (p1 - p2) / 0.1
+        diff2 = (p0 - p1) / 0.1
+        diff = (diff1+diff2)/2
+
+    if TEST == "Borsa":
+        coupon, maturity, issue = (0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020))
+        p = 83.55
+        y = 3.04
+        s2 = BTP(issue, maturity, coupon, )
+        test = s2.bond_yield(price=p, eval_date=ql.Date(6, 5, 2022))*100  # 3.04
+        test2 = s2.clean_price(bond_yield=3.037/100, eval_date=ql.Date(6, 5, 2022))  # 83.55
+        test3 = s2.dirty_price(bond_yield=3.037/100, eval_date=ql.Date(6, 5, 2022))
+        test4 = s2.accrued_amount(eval_date=ql.Date(6, 5, 2022))
+        test5 = s2.npv(bond_yield=test/100, eval_date=ql.Date(6, 5, 2022))
+
+    if TEST == 'ForwardYield':
+        """
+        The Yield for a futures contract is calculated as the yield to maturity of a cash security with the following
+        specifications:
+        - Settlement Date = last delivery day for the futures contract
+        - Maturity Date = maturity date of the CTD cash security
+        - Coupon Rate = coupon rate per annum of the CTD cash security
+        - Bond Price = (futures price * conversion factor for CTD cash security) + (accrued Coupon interest on CTD
+                                                                                    cash security, from latest Coupon
+                                                                                    payment date to Settlement Date)
+        - Coupon Frequency = (Coupon Rate / 2) paid semiannually
+        - Day Count Basis = (actual / actual)
+        - Par Value = 100
+        """
+
+        coupon, maturity, issue, price = (0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020), 90.81)
+        f_price = 137.54
+        f_delivery = ql.Date(10, 6, 2022)
+        settle = f_delivery
+
+        s = FixedRateBondEurex(issue, maturity, coupon)
+        cf, basis = s.futures_contract_conversion_factor(price, f_price, f_delivery, 0.06)
+        expected_bond_price = (f_price * cf) + s.accrued_amount(f_delivery)
+        fwd_yld = s.bond_yield(price=expected_bond_price, eval_date=settle)
+        print("%-15s = %lf" % ("Forward Price", f_price))
+        print("%-15s = %lf" % ("Forward Yield", fwd_yld*100))
+
+    if TEST == 'ComputePrice':
+        coupon, maturity, issue = (0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020))
+        s2 = BTP(issue, maturity, coupon)
+        test = s2.bond_yield(price=91.04, eval_date=ql.Date(1, 4, 2022))  # 2.0
+        test2 = s2.clean_price(bond_yield=test, eval_date=ql.Date(1, 4, 2022))  # 91.04
+        test4 = s2.dirty_price(bond_yield=test, eval_date=ql.Date(1, 4, 2022))  # 91.04
+        test3 = s2.npv(bond_yield=test, eval_date=ql.Date(1, 4, 2022))
+
+        print("%-15s = %1.3f" % ("Expected Yield", 2.0))
+        print("%-15s = %1.3f" % ("Bond Yield", round(test * 100, 2)))
+        print("%-15s = %1.3f" % ("Expected Price", 91.04))
+        print("%-15s = %1.3f" % ("Clean Price", test2))
+        print("%-15s = %1.3f" % ("Dirty Price", test4))
+        print("%-15s = %1.3f" % ("NPV", test3))
+        print("")
+
+        p = 88.01
+        y = 0.0203
+        coupon, maturity, issue = (0.60, ql.Date(1, 8, 2031), ql.Date(23, 2, 2021))
+        s2 = BTP(issue, maturity, coupon)
+        ttest = s2.bond_yield(price=p, eval_date=ql.Date(1, 4, 2022))  # 2.0
+        ttest2 = s2.clean_price(bond_yield=ttest, eval_date=ql.Date(1, 4, 2022))  # 88.01
+        ttest4 = s2.dirty_price(bond_yield=ttest, eval_date=ql.Date(1, 4, 2022))  # 88.41
+        ttest3 = s2.npv(bond_yield=ttest, eval_date=ql.Date(1, 4, 2022))
+
+        print("%-15s = %1.3f" % ("Expected Yield", y * 100))
+        print("%-15s = %1.3f" % ("Bond Yield", round(ttest * 100, 2)))
+        print("%-15s = %1.3f" % ("Expected Price", p))
+        print("%-15s = %1.3f" % ("Clean Price", ttest2))
+        print("%-15s = %1.3f" % ("Dirty Price", ttest4))
+        print("%-15s = %1.3f" % ("NPV", ttest3))
+        print("")
+
+    if TEST == 'CTD':
+        """
+        The holder of a short position in a Treasury futures contract must deliver a cash Treasury security to the
+        holder of the offsetting long futures position upon contract expiration.  There are typically several cash
+        securities available that fulfill the specification of the futures contract.  Because of accrued interest,
+        differing maturities, etc. of the various cash securities, there are differing cash flows associated with
+        the deliver process.  The cash security with the lowest cash flow cost is known as the Cheapest to Deliver.
+        """
+
+        # A día 2022-04-01
+        date = ql.Date(1, 4, 2022)
+        basket = [(0.90, ql.Date(1, 4, 2031), ql.Date(1, 10, 2020), 90.81),  # IT0005422891  ->  0.659620
+                  (0.60, ql.Date(1, 8, 2031), ql.Date(23, 2, 2021), 88.5),  # IT0005436693  ->  0.628867
+                  (0.95, ql.Date(1, 12, 2031), ql.Date(1, 6, 2021), 91.0),  # IT0005449969  ->  0.643888
+                  (0.95, ql.Date(1, 6, 2032), ql.Date(1, 11, 2021), 90.09)  # IT0005466013  ->  0.630012
+                  ]
+
+        f_price = 137.54
+        f_delivery = ql.Date(10, 6, 2022)
+
+        securities = []
+        min_basis = 100
+        min_basis_index = -1
+        for i, b in enumerate(basket):
+            coupon, maturity, issue, price = b
+            s = FixedRateBondEurex(issue, maturity, coupon)
+            cf, basis = s.futures_contract_conversion_factor(price, f_price, f_delivery)
+            if basis < min_basis:
+                min_basis = basis
+                min_basis_index = i
+            securities.append((s, cf))
+
+        ctd_info = basket[min_basis_index]
+        ctd_bond, ctd_cf = securities[min_basis_index]
+        ctd_price = ctd_info[3]
+
+        print("%-30s = %lf" % ("Minimum Basis", min_basis))
+        print("%-30s = %lf" % ("Conversion Factor", ctd_cf))
+        print("%-30s = %lf" % ("Expected Conversion Factor", 0.659620))
+        print("%-30s = %lf" % ("Coupon", ctd_info[0]))
+        print("%-30s = %s" % ("Maturity", ctd_info[1]))
+        print("%-30s = %lf" % ("Price", ctd_info[3]))

@@ -1,0 +1,15 @@
+D:\PycharmProjects\Coding\RandomStuff\Hedger\bin\Debug\net6.0\Hedger.deps.json
+D:\PycharmProjects\Coding\RandomStuff\Hedger\bin\Debug\net6.0\Hedger.dll
+D:\PycharmProjects\Coding\RandomStuff\Hedger\bin\Debug\net6.0\Hedger.pdb
+D:\PycharmProjects\Coding\RandomStuff\Hedger\obj\Debug\net6.0\Hedger.csproj.AssemblyReference.cache
+D:\PycharmProjects\Coding\RandomStuff\Hedger\obj\Debug\net6.0\Hedger.GeneratedMSBuildEditorConfig.editorconfig
+D:\PycharmProjects\Coding\RandomStuff\Hedger\obj\Debug\net6.0\Hedger.AssemblyInfoInputs.cache
+D:\PycharmProjects\Coding\RandomStuff\Hedger\obj\Debug\net6.0\Hedger.AssemblyInfo.cs
+D:\PycharmProjects\Coding\RandomStuff\Hedger\obj\Debug\net6.0\Hedger.csproj.CoreCompileInputs.cache
+D:\PycharmProjects\Coding\RandomStuff\Hedger\obj\Debug\net6.0\Hedger.dll
+D:\PycharmProjects\Coding\RandomStuff\Hedger\obj\Debug\net6.0\refint\Hedger.dll
+D:\PycharmProjects\Coding\RandomStuff\Hedger\obj\Debug\net6.0\Hedger.pdb
+D:\PycharmProjects\Coding\RandomStuff\Hedger\obj\Debug\net6.0\ref\Hedger.dll
+D:\PycharmProjects\Coding\RandomStuff\Hedger\bin\Debug\net6.0\QuantlibBond.dll
+D:\PycharmProjects\Coding\RandomStuff\Hedger\bin\Debug\net6.0\QuantlibBond.pdb
+D:\PycharmProjects\Coding\RandomStuff\Hedger\obj\Debug\net6.0\Hedger.csproj.CopyComplete
